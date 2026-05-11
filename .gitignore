@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+backend/app/storage/*.db
+backend/app/storage/exports/*
+backend/app/storage/uploads/*
+frontend/node_modules/
+frontend/dist/
+.DS_Store
+.idea
+.playwright-mcp
+.venv
