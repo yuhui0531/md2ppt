@@ -135,4 +135,4 @@ Interactive docs are available at `http://localhost:8000/docs` once the backend 
 
 ## License
 
-No license has been specified yet.
+Released under the [MIT License](LICENSE).
