@@ -85,6 +85,7 @@ export function WorkspacePage() {
         </div>
         <div className="actions">
           {canResume ? <button type="button" className="secondary" disabled={busy !== null} onClick={resumeGeneration}>继续生成</button> : null}
+          <Link className="button secondary" to={`/workspace/${project.project_id}/images`}>批量生图</Link>
           <Link className="button" to={`/review/${project.project_id}`}>审核与导出</Link>
         </div>
       </section>

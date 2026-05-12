@@ -4,6 +4,7 @@ import { ModelConfigPage } from './routes/ModelConfigPage';
 import { ProjectsPage } from './routes/ProjectsPage';
 import { ReviewExportPage } from './routes/ReviewExportPage';
 import { UploadPage } from './routes/UploadPage';
+import { ImageGenerationPage } from './routes/ImageGenerationPage';
 import { WorkspacePage } from './routes/WorkspacePage';
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="projects/new" element={<UploadPage />} />
         <Route path="settings/model" element={<ModelConfigPage />} />
         <Route path="workspace/:projectId" element={<WorkspacePage />} />
+        <Route path="workspace/:projectId/images" element={<ImageGenerationPage />} />
         <Route path="review/:projectId" element={<ReviewExportPage />} />
       </Route>
       <Route path="/model-config" element={<Navigate to="/settings/model" replace />} />

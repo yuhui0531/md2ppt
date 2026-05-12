@@ -6,6 +6,7 @@ from sqlmodel import Session
 from app.models.db import engine, get_session
 from app.models.schemas import (
     CheckConsistencyRequest,
+    GenerateImagesRequest,
     GenerateProjectRequest,
     JobResponse,
     ProjectResponse,
@@ -14,6 +15,7 @@ from app.models.schemas import (
     ReviseInconsistentPromptsRequest,
 )
 from app.services.generation_service import GenerationService
+from app.services.image_generation_service import ImageGenerationService
 from app.services.job_service import JobService
 
 router = APIRouter(tags=["generation"])
@@ -109,3 +111,39 @@ async def check_consistency(project_id: str, request: CheckConsistencyRequest, s
 async def revise_inconsistent_prompts(project_id: str, request: ReviseInconsistentPromptsRequest, session: Session = Depends(get_session)) -> ProjectResponse:
     updated = await GenerationService(session).revise_inconsistent_prompts(project_id, request.threshold)
     return ProjectResponse(project=updated)
+
+
+@router.post("/api/projects/{project_id}/generate-images", response_model=JobResponse)
+async def generate_images(
+    project_id: str,
+    request: GenerateImagesRequest,
+    session: Session = Depends(get_session),
+) -> JobResponse:
+    ImageGenerationService(session).get_image_config()
+    job_service = JobService(session)
+    if job_service.has_active_job(project_id):
+        raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
+    job = job_service.create_job(project_id)
+    job_service.update(job, stage="queued", progress=0.0, message="批量生图任务已创建", status="running")
+    asyncio.create_task(_run_image_generation_job(job.id, project_id, request.slide_numbers, request.extra_prompt))
+    return JobResponse(
+        job_id=job.id,
+        project_id=job.project_id,
+        status=job.status,
+        stage=job.stage,
+        progress=job.progress,
+        message=job.message,
+        error=job.error,
+    )
+
+
+async def _run_image_generation_job(job_id: str, project_id: str, slide_numbers: list[int] | None, extra_prompt: str | None = None) -> None:
+    with Session(engine) as session:
+        job_service = JobService(session)
+        job = job_service.get_job(job_id)
+        try:
+            await ImageGenerationService(session).run_batch_generation(
+                project_id, slide_numbers, job_service, job, extra_prompt=extra_prompt
+            )
+        except Exception as exc:
+            job_service.update(job, stage="failed", progress=job.progress, message=str(exc), status="failed", error=str(exc))

@@ -223,6 +223,7 @@ class Slide(BaseModel):
     style_consistency_score: float | None = None
     style_issues: list[str] = Field(default_factory=list)
     revision_needed: bool = False
+    image_url: str | None = None
 
 
 class ConsistencySlideReport(BaseModel):
@@ -292,6 +293,11 @@ class CheckConsistencyRequest(BaseModel):
 class ReviseInconsistentPromptsRequest(BaseModel):
     threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     max_rounds: int = Field(default=2, ge=1, le=3)
+
+
+class GenerateImagesRequest(BaseModel):
+    slide_numbers: list[int] | None = None
+    extra_prompt: str | None = None
 
 
 class ExportRequest(BaseModel):

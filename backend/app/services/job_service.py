@@ -6,6 +6,8 @@ from sqlmodel import Session, select
 
 from app.models.job import JobRecord
 
+JOB_TIMEOUT_SECONDS = 180
+
 
 class JobService:
     def __init__(self, session: Session) -> None:
@@ -26,7 +28,19 @@ class JobService:
 
     def has_active_job(self, project_id: str) -> bool:
         statement = select(JobRecord).where(JobRecord.project_id == project_id, JobRecord.status == "running")
-        return self.session.exec(statement).first() is not None
+        job = self.session.exec(statement).first()
+        if not job:
+            return False
+        elapsed = (datetime.now(timezone.utc) - job.updated_at).total_seconds()
+        if elapsed > JOB_TIMEOUT_SECONDS:
+            job.status = "failed"
+            job.stage = "timeout"
+            job.message = "任务超时，已自动标记为失败"
+            job.updated_at = datetime.now(timezone.utc)
+            self.session.add(job)
+            self.session.commit()
+            return False
+        return True
 
     def update(self, job: JobRecord, *, stage: str, progress: float, message: str, status: str | None = None, error: str | None = None) -> None:
         job.stage = stage

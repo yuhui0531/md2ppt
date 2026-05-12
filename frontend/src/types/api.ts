@@ -103,6 +103,7 @@ export interface Slide {
   style_consistency_score?: number | null;
   style_issues: string[];
   revision_needed: boolean;
+  image_url?: string | null;
 }
 
 export interface ConsistencySlideReport {
