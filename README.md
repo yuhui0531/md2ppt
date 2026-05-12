@@ -1,5 +1,7 @@
 # Markdown PPT Prompt App (md2ppt)
 
+English | [中文](README.zh-CN.md)
+
 A local web application that turns Markdown raw materials into PPT-style slide decks. It uses LLM-driven outlining and prompt generation to produce per-slide image prompts, generates slide images via a configurable image model gateway, and exports the result as a Markdown bundle or a `.pptx` file.
 
 ## Features
