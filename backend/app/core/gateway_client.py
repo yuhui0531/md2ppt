@@ -6,6 +6,23 @@ from app.config import settings
 from app.core.security import validate_gateway_base_url
 
 
+def _gateway_timeout() -> httpx.Timeout:
+    read = settings.gateway_timeout_seconds
+    return httpx.Timeout(connect=15.0, read=read, write=30.0, pool=30.0)
+
+
+def _log_response(tag: str, response: httpx.Response, **extra: Any) -> None:
+    elapsed = response.elapsed.total_seconds()
+    parts = [
+        f"[gateway] {tag}",
+        f"status={response.status_code}",
+        f"elapsed={elapsed:.2f}s",
+        f"bytes={len(response.content)}",
+    ]
+    parts.extend(f"{k}={v}" for k, v in extra.items())
+    print(" ".join(parts), flush=True)
+
+
 class GatewayError(Exception):
     pass
 
@@ -22,13 +39,14 @@ class GatewayClient:
         endpoint = models_endpoint if models_endpoint.startswith("/") else f"/{models_endpoint}"
         url = f"{self.base_url}{endpoint}"
         async with httpx.AsyncClient(
-            timeout=settings.gateway_timeout_seconds,
+            timeout=_gateway_timeout(),
             follow_redirects=False,
         ) as client:
             try:
                 response = await client.get(url, headers=self._headers())
             except httpx.HTTPError as exc:
                 raise GatewayError(f"模型列表请求失败：{exc.__class__.__name__}") from exc
+        _log_response("list_models", response)
         if response.is_redirect:
             raise GatewayError("模型网关返回重定向，已拒绝跟随")
         if response.status_code == 401:
@@ -56,13 +74,15 @@ class GatewayClient:
             "response_format": {"type": "json_object"},
         }
         async with httpx.AsyncClient(
-            timeout=settings.gateway_timeout_seconds,
+            timeout=_gateway_timeout(),
             follow_redirects=False,
         ) as client:
             try:
                 response = await client.post(url, headers=self._headers(), json=payload)
             except httpx.HTTPError as exc:
+                print(f"[gateway] chat_completion FAILED model={model} error={exc.__class__.__name__}: {exc}", flush=True)
                 raise GatewayError(f"生成请求失败：{exc.__class__.__name__}") from exc
+        _log_response("chat_completion", response, model=model, max_tokens=max_tokens)
         if response.is_redirect:
             raise GatewayError("模型网关返回重定向，已拒绝跟随")
         if response.status_code == 401:
@@ -94,13 +114,15 @@ class GatewayClient:
             "response_format": "url",
         }
         async with httpx.AsyncClient(
-            timeout=settings.gateway_timeout_seconds,
+            timeout=_gateway_timeout(),
             follow_redirects=False,
         ) as client:
             try:
                 response = await client.post(url, headers=self._headers(), json=payload)
             except httpx.HTTPError as exc:
+                print(f"[gateway] image_generation FAILED model={model} error={exc.__class__.__name__}: {exc}", flush=True)
                 raise GatewayError(f"生图请求失败：{exc.__class__.__name__}") from exc
+        _log_response("image_generation", response, model=model)
         if response.is_redirect:
             raise GatewayError("模型网关返回重定向，已拒绝跟随")
         if response.status_code == 401:

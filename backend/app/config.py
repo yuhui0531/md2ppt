@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     storage_dir: Path = _DEFAULT_STORAGE_DIR
     database_url: str = f"sqlite:///{_DEFAULT_STORAGE_DIR / 'app.db'}"
     allow_local_gateway_urls: bool = False
-    gateway_timeout_seconds: float = 180.0
+    gateway_timeout_seconds: float = 600.0
     max_gateway_response_bytes: int = 4_000_000
 
 

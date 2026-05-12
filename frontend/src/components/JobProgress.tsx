@@ -1,5 +1,6 @@
 import React from 'react';
 import { Progress, Typography, Alert, Space, Card } from 'antd';
+import { LoadingOutlined, CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
 import type { JobResponse } from '../types/api';
 import { jobStatusLabel } from '../utils/projectPresentation';
 
@@ -12,30 +13,49 @@ interface JobProgressProps {
 export function JobProgress({ job }: JobProgressProps) {
   if (!job) return null;
   const progress = Math.round((job.progress ?? 0) * 100);
-  
+  const isRunning = job.status === 'running';
+
   const getStatus = () => {
     if (job.status === 'completed') return 'success';
     if (job.status === 'failed') return 'exception';
-    if (job.status === 'running') return 'active';
+    if (isRunning) return 'active';
     return 'normal';
   };
 
+  const statusIcon = isRunning
+    ? <LoadingOutlined spin style={{ color: '#1677ff', fontSize: 18 }} />
+    : job.status === 'completed'
+      ? <CheckCircleFilled style={{ color: '#52c41a', fontSize: 18 }} />
+      : job.status === 'failed'
+        ? <CloseCircleFilled style={{ color: '#ff4d4f', fontSize: 18 }} />
+        : null;
+
   return (
-    <Card bordered={false} style={{ borderRadius: 12, background: '#f8fafc', marginBottom: 24, border: '1px solid #e2e8f0' }} bodyStyle={{ padding: 20 }}>
+    <Card
+      bordered={false}
+      className={`job-progress-card ${isRunning ? 'is-running' : ''}`}
+      style={{ borderRadius: 12, background: '#f8fafc', marginBottom: 24, border: '1px solid #e2e8f0' }}
+      bodyStyle={{ padding: 20 }}
+    >
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text strong style={{ fontSize: 16 }}>{job.message || '正在生成'}</Text>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+          <Space size={10} align="center">
+            {statusIcon}
+            <Text strong style={{ fontSize: 16 }}>{job.message || '正在生成'}</Text>
+          </Space>
           <Text type="secondary" style={{ fontSize: 13 }}>
             阶段：{stageLabel(job.stage)} · 状态：{jobStatusLabel(job.status)}
           </Text>
         </div>
-        
-        <Progress 
-          percent={progress} 
-          status={getStatus()} 
-          strokeColor={job.status === 'running' ? '#1677ff' : undefined}
+
+        <Progress
+          percent={progress}
+          status={getStatus()}
+          strokeWidth={12}
+          strokeColor={isRunning ? { from: '#1677ff', to: '#69b1ff' } : undefined}
+          showInfo
         />
-        
+
         {job.error && (
           <Alert message={job.error} type="error" showIcon style={{ marginTop: 8 }} />
         )}

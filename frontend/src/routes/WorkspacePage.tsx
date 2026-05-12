@@ -12,11 +12,17 @@ import type { JobResponse, ProjectData } from '../types/api';
 import { pollJobUntilFinished } from '../utils/jobPolling';
 import { projectStateLabel } from '../utils/projectPresentation';
 
-import { Card, Col, Row, Typography, Button, Space, Tabs, Tag, Alert, Spin, Input } from 'antd';
-import { PictureOutlined, CheckCircleOutlined, ExportOutlined, PlayCircleOutlined, SyncOutlined } from '@ant-design/icons';
+import { Card, Col, Row, Typography, Button, Space, Tabs, Tag, Alert, Spin, Input, Collapse } from 'antd';
+import { PictureOutlined, CheckCircleOutlined, ExportOutlined, PlayCircleOutlined, SyncOutlined, DownOutlined, UpOutlined } from '@ant-design/icons';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
+
+const expandSymbol = (expanded: boolean) => (
+  <span style={{ marginLeft: 4, color: '#1677ff' }}>
+    {expanded ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
+  </span>
+);
 
 export function WorkspacePage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -111,37 +117,46 @@ export function WorkspacePage() {
       )}
       <JobProgress job={job} />
 
-      {/* Main Layout: Left/Right */}
-      <Row gutter={[24, 24]} align="stretch">
-        
-        {/* Left Column: Outline & Materials */}
-        <Col xs={24} lg={8} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <Card 
-            title={<><span style={{ marginRight: 8 }}>素材结构</span><Tag bordered={false}>共 {project.parsed_sections.length} 段</Tag></>} 
-            bordered={false} 
-            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
-            bodyStyle={{ maxHeight: 300, overflowY: 'auto' }}
-          >
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+      {/* 素材结构 - collapsible, shows ALL sections when expanded */}
+      <Collapse
+        bordered={false}
+        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', background: '#fff' }}
+        items={[{
+          key: 'parsed-sections',
+          label: (
+            <Space size={8}>
+              <Text strong>素材结构</Text>
+              <Tag bordered={false}>共 {project.parsed_sections.length} 段</Tag>
+            </Space>
+          ),
+          children: (
+            <Row gutter={[12, 12]}>
               {project.parsed_sections.map((section) => (
-                <div key={section.id} style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <Tag color="cyan" style={{ margin: 0 }}>L{section.level}</Tag>
-                    <Text strong ellipsis>{section.heading}</Text>
+                <Col key={section.id} xs={24} sm={12} md={8} lg={6}>
+                  <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0', height: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <Tag color="cyan" style={{ margin: 0 }}>L{section.level}</Tag>
+                      <Text strong ellipsis>{section.heading}</Text>
+                    </div>
+                    <Paragraph type="secondary" style={{ margin: 0, fontSize: 13 }} ellipsis={{ rows: 3, expandable: 'collapsible', symbol: expandSymbol }}>
+                      {section.content}
+                    </Paragraph>
                   </div>
-                  <Paragraph type="secondary" style={{ margin: 0, fontSize: 13 }} ellipsis={{ rows: 2 }}>
-                    {section.content}
-                  </Paragraph>
-                </div>
+                </Col>
               ))}
-            </div>
-          </Card>
+            </Row>
+          ),
+        }]}
+      />
 
-          <Card 
-            title={<><span style={{ marginRight: 8 }}>页数与大纲</span><Tag bordered={false}>共 {project.slides.length} 页</Tag></>} 
-            bordered={false} 
-            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', flex: 1, display: 'flex', flexDirection: 'column' }}
-            bodyStyle={{ padding: '0 0 16px 0', flex: 1, display: 'flex', flexDirection: 'column', maxHeight: 600, overflow: 'hidden' }}
+      {/* Main work area: page list | details/prompt | consistency, aligned at top */}
+      <Row gutter={[24, 24]} align="stretch">
+        <Col xs={24} lg={7} style={{ display: 'flex' }}>
+          <Card
+            title={<><span style={{ marginRight: 8 }}>页数与大纲</span><Tag bordered={false}>共 {project.slides.length} 页</Tag></>}
+            bordered={false}
+            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%', display: 'flex', flexDirection: 'column' }}
+            bodyStyle={{ padding: 0, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 180px)', overflow: 'hidden' }}
           >
             {project.slide_count_plan && (
               <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', background: '#fdfdfd' }}>
@@ -149,17 +164,19 @@ export function WorkspacePage() {
                   <Text type="secondary">推荐页数</Text>
                   <Text strong>{project.slide_count_plan.accepted_slide_count} 页</Text>
                 </div>
-                <Text type="secondary" style={{ fontSize: 12 }}>{project.slide_count_plan.coverage_summary || project.slide_count_plan.reason}</Text>
+                <Paragraph type="secondary" style={{ margin: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: 'collapsible', symbol: expandSymbol }}>
+                  {project.slide_count_plan.coverage_summary || project.slide_count_plan.reason}
+                </Paragraph>
               </div>
             )}
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {project.slides.map((item, index) => (
-                <div 
-                  key={item.slide_no} 
+                <div
+                  key={item.slide_no}
                   onClick={() => setActiveSlide(index)}
-                  style={{ 
-                    padding: '16px 24px', 
-                    cursor: 'pointer', 
+                  style={{
+                    padding: '14px 24px',
+                    cursor: 'pointer',
                     borderBottom: '1px solid #f0f0f0',
                     background: index === activeSlide ? '#e6f4ff' : 'transparent',
                     borderLeft: index === activeSlide ? '3px solid #1677ff' : '3px solid transparent',
@@ -177,149 +194,141 @@ export function WorkspacePage() {
           </Card>
         </Col>
 
-        {/* Right Column: Consistency, Slide Details, Prompt */}
-        <Col xs={24} lg={16} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          
-          <Row gutter={[24, 24]}>
-            <Col xs={24} xl={16} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              <Card 
-                bordered={false} 
-                style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
-                bodyStyle={{ padding: 24 }}
+        <Col xs={24} lg={11} style={{ display: 'flex' }}>
+          <Card
+            bordered={false}
+            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%', display: 'flex', flexDirection: 'column' }}
+            bodyStyle={{ padding: 24, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 180px)', overflow: 'hidden' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12 }}>
+              <Title level={4} style={{ margin: 0 }}>{slide ? getCurrentSlideHeading(slide) : '当前页详情'}</Title>
+              <Button
+                icon={<SyncOutlined />}
+                disabled={!slide || busy !== null}
+                loading={busy === '已重新生成当前页 prompt'}
+                onClick={() => refreshWith(() => regeneratePrompts(project.project_id, [slide!.slide_no]), '已重新生成当前页 prompt')}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
-                  <Title level={3} style={{ margin: 0 }}>{slide ? getCurrentSlideHeading(slide) : '当前页详情'}</Title>
-                  <Button 
-                    icon={<SyncOutlined />} 
-                    disabled={!slide || busy !== null} 
-                    loading={busy === '已重新生成当前页 prompt'}
-                    onClick={() => refreshWith(() => regeneratePrompts(project.project_id, [slide!.slide_no]), '已重新生成当前页 prompt')}
-                  >
-                    重生成当前页
-                  </Button>
-                </div>
+                重生成当前页
+              </Button>
+            </div>
 
-                {slide && (
-                  <Space direction="vertical" size="large" style={{ width: '100%' }}>
-                    {slideMetaItems.length > 0 && (
-                      <Row gutter={[16, 16]}>
-                        {slideMetaItems.map((item) => (
-                          <Col key={item.label} xs={12} sm={8}>
-                            <div style={{ background: '#f8fafc', padding: '8px 16px', borderRadius: 8 }}>
-                              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 2 }}>{item.label}</Text>
-                              <Text strong>{item.value}</Text>
-                            </div>
-                          </Col>
-                        ))}
-                      </Row>
-                    )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div>
+                <Title level={5} style={{ margin: 0 }}>Prompt 工作区</Title>
+                <Text type="secondary" style={{ fontSize: 12 }}>当前页内容、详情与预览切换查看</Text>
+              </div>
+              <Tabs
+                activeKey={detailView}
+                onChange={setDetailView}
+                items={[
+                  { key: 'prompt', label: 'Prompt' },
+                  { key: 'detail', label: '详情' },
+                  { key: 'preview', label: '预览' },
+                ]}
+                style={{ marginBottom: 0 }}
+              />
+            </div>
 
-                    {hasSlideSummary && (
-                      <div style={{ background: '#f8fafc', padding: 20, borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                        {hasText(slide.core_message) && (
-                          <div style={{ marginBottom: 16 }}>
-                            <Text type="secondary" style={{ fontSize: 12, fontWeight: 600 }}>核心信息</Text>
-                            <Paragraph style={{ margin: '4px 0 0', fontSize: 15 }}>{slide.core_message}</Paragraph>
+            <div style={{ flex: 1, minHeight: 520, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', padding: detailView === 'prompt' ? 0 : 16, overflow: 'auto' }}>
+              {detailView === 'prompt' && (
+                <TextArea
+                  readOnly
+                  value={slide?.prompt ?? ''}
+                  style={{ height: '100%', minHeight: 520, resize: 'none', border: 'none', background: 'transparent', padding: 16, fontFamily: 'monospace' }}
+                />
+              )}
+              {detailView === 'preview' && <MarkdownPreview content={slide?.prompt ?? ''} />}
+              {detailView === 'detail' && slide && (
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  {slideMetaItems.length > 0 && (
+                    <Row gutter={[12, 12]}>
+                      {slideMetaItems.map((item) => (
+                        <Col key={item.label} xs={12} sm={8}>
+                          <div style={{ background: '#fff', padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                            <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>{item.label}</Text>
+                            <Text strong style={{ fontSize: 13 }}>{item.value}</Text>
                           </div>
-                        )}
-                        
-                        <Row gutter={[24, 24]}>
-                          <Col xs={24} sm={8}><DetailList title="模块" items={slideModules} /></Col>
-                          <Col xs={24} sm={8}><DetailList title="视觉元素" items={slideVisualElements} /></Col>
-                          <Col xs={24} sm={8}><DetailList title="文字层级" items={slideTextHierarchy} /></Col>
-                        </Row>
-                      </div>
-                    )}
-
-                    {slidePageText.length > 0 && (
-                      <div style={{ background: '#f8fafc', padding: 20, borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                        <Text type="secondary" style={{ fontSize: 12, fontWeight: 600 }}>页面文案</Text>
-                        <div style={{ marginTop: 8 }}>
-                          {slidePageText.map((text, i) => (
-                            <Paragraph key={i} style={{ marginBottom: i === slidePageText.length - 1 ? 0 : 8 }}>{text}</Paragraph>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </Space>
-                )}
-              </Card>
-
-              <Card 
-                bordered={false} 
-                style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', flex: 1, display: 'flex', flexDirection: 'column' }}
-                bodyStyle={{ padding: 24, flex: 1, display: 'flex', flexDirection: 'column' }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <div>
-                    <Title level={4} style={{ margin: 0 }}>Prompt 工作区</Title>
-                    <Text type="secondary" style={{ fontSize: 13 }}>当前页内容与预览切换查看</Text>
-                  </div>
-                  <Tabs 
-                    activeKey={detailView} 
-                    onChange={setDetailView} 
-                    items={[
-                      { key: 'prompt', label: 'Prompt' },
-                      { key: 'preview', label: '预览' }
-                    ]}
-                    style={{ marginBottom: 0 }}
-                  />
-                </div>
-
-                <div style={{ flex: 1, minHeight: 300, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', padding: detailView === 'prompt' ? 0 : 16, overflow: 'auto' }}>
-                  {detailView === 'prompt' ? (
-                    <TextArea 
-                      readOnly 
-                      value={slide?.prompt ?? ''} 
-                      style={{ height: '100%', resize: 'none', border: 'none', background: 'transparent', padding: 16, fontFamily: 'monospace' }} 
-                    />
-                  ) : (
-                    <MarkdownPreview content={slide?.prompt ?? ''} />
+                        </Col>
+                      ))}
+                    </Row>
                   )}
-                </div>
-              </Card>
-            </Col>
-            
-            <Col xs={24} xl={8}>
-              <Card 
-                title="风格一致性" 
-                bordered={false} 
-                style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%' }}
-                bodyStyle={{ padding: 24, maxHeight: 800, overflowY: 'auto' }}
-              >
-                <Space direction="vertical" style={{ width: '100%', marginBottom: 24 }}>
-                  <Button 
-                    block 
-                    icon={<CheckCircleOutlined />} 
-                    disabled={busy !== null} 
-                    loading={busy === '一致性检查已完成'}
-                    onClick={() => refreshWith(() => checkConsistency(project.project_id, project.generation_options.consistency_threshold), '一致性检查已完成')}
-                  >
-                    检查一致性
-                  </Button>
-                  <Button 
-                    block 
-                    type="primary" 
-                    ghost 
-                    disabled={busy !== null} 
-                    loading={busy === '不一致页面已修正'}
-                    onClick={() => refreshWith(() => reviseInconsistentPrompts(project.project_id, project.generation_options.consistency_threshold), '不一致页面已修正')}
-                  >
-                    修正不一致
-                  </Button>
+
+                  {hasText(slide.core_message) && (
+                    <div>
+                      <Text type="secondary" style={{ fontSize: 12, fontWeight: 600 }}>核心信息</Text>
+                      <Paragraph style={{ margin: '4px 0 0', fontSize: 14 }}>{slide.core_message}</Paragraph>
+                    </div>
+                  )}
+
+                  {hasSlideSummary && (
+                    <Row gutter={[16, 16]}>
+                      <Col xs={24} sm={8}><DetailList title="模块" items={slideModules} /></Col>
+                      <Col xs={24} sm={8}><DetailList title="视觉元素" items={slideVisualElements} /></Col>
+                      <Col xs={24} sm={8}><DetailList title="文字层级" items={slideTextHierarchy} /></Col>
+                    </Row>
+                  )}
+
+                  {slidePageText.length > 0 && (
+                    <div>
+                      <Text type="secondary" style={{ fontSize: 12, fontWeight: 600 }}>页面文案</Text>
+                      <div style={{ marginTop: 8 }}>
+                        {slidePageText.map((text, i) => (
+                          <Paragraph key={i} style={{ marginBottom: i === slidePageText.length - 1 ? 0 : 8 }}>{text}</Paragraph>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!hasSlideSummary && slidePageText.length === 0 && slideMetaItems.length === 0 && !hasText(slide.core_message) && (
+                    <Text type="secondary">当前页暂无结构化详情。</Text>
+                  )}
                 </Space>
-                
-                <ConsistencyReportView report={project.consistency_report} />
-              </Card>
-            </Col>
-          </Row>
+              )}
+              {detailView === 'detail' && !slide && (
+                <Text type="secondary">尚未选中页面。</Text>
+              )}
+            </div>
+          </Card>
+        </Col>
+
+        <Col xs={24} lg={6} style={{ display: 'flex' }}>
+          <Card
+            title="风格一致性"
+            bordered={false}
+            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%', display: 'flex', flexDirection: 'column' }}
+            bodyStyle={{ padding: 24, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 180px)', overflowY: 'auto' }}
+          >
+            <Space direction="vertical" style={{ width: '100%', marginBottom: 24 }}>
+              <Button
+                block
+                icon={<CheckCircleOutlined />}
+                disabled={busy !== null}
+                loading={busy === '一致性检查已完成'}
+                onClick={() => refreshWith(() => checkConsistency(project.project_id, project.generation_options.consistency_threshold), '一致性检查已完成')}
+              >
+                检查一致性
+              </Button>
+              <Button
+                block
+                type="primary"
+                ghost
+                disabled={busy !== null}
+                loading={busy === '不一致页面已修正'}
+                onClick={() => refreshWith(() => reviseInconsistentPrompts(project.project_id, project.generation_options.consistency_threshold), '不一致页面已修正')}
+              >
+                修正不一致
+              </Button>
+            </Space>
+
+            <ConsistencyReportView report={project.consistency_report} />
+          </Card>
         </Col>
       </Row>
 
       {/* Bottom Area: Style Guide */}
-      <Card 
-        title="统一视觉规范" 
-        bordered={false} 
+      <Card
+        title="统一视觉规范"
+        bordered={false}
         style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', marginTop: 8 }}
       >
         <StyleGuidePanel styleGuide={project.style_guide} />

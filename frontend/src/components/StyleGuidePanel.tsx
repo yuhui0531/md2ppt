@@ -19,7 +19,7 @@ export function StyleGuidePanel({ styleGuide }: StyleGuidePanelProps) {
         {styleGuide.visual_style}
       </Paragraph>
       
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 24 }}>
         <TagList title="配色" items={styleGuide.color_palette} color="blue" />
         <TagList title="版式" items={styleGuide.layout_rules} color="purple" />
         <TagList title="字体" items={styleGuide.typography_rules} color="cyan" />

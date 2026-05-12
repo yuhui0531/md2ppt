@@ -13,7 +13,7 @@ export function ModelConfigPage() {
   const [apiKey, setApiKey] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
   const [temperature, setTemperature] = useState(0.4);
-  const [maxTokens, setMaxTokens] = useState(8192);
+  const [maxTokens, setMaxTokens] = useState(81920);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [tested, setTested] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -45,7 +45,7 @@ export function ModelConfigPage() {
         setBaseUrl(config.base_url ?? '');
         setSelectedModel(config.selected_model ?? '');
         setTemperature(config.temperature ?? 0.4);
-        setMaxTokens(config.max_tokens ?? 8192);
+        setMaxTokens(config.max_tokens ?? 81920);
         setMessage({ kind: 'info', text: '已加载现有模型配置；如需修改，请重新填写 API Key 并测试。' });
       })
       .catch(() => undefined);
@@ -233,7 +233,7 @@ export function ModelConfigPage() {
             </Col>
             <Col span={12}>
               <Form.Item label="Max Tokens">
-                <InputNumber min={1} value={maxTokens} onChange={(val) => setMaxTokens(val || 8192)} style={{ width: '100%' }} />
+                <InputNumber min={1} value={maxTokens} onChange={(val) => setMaxTokens(val || 81920)} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>

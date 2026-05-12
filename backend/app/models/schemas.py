@@ -40,7 +40,7 @@ class SaveModelConfigRequest(BaseModel):
     api_key: str = Field(min_length=1)
     selected_model: str = Field(min_length=1)
     temperature: float = Field(default=0.4, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=8192, ge=1)
+    max_tokens: int = Field(default=81920, ge=1)
     generation_endpoint_type: Literal["chat_completions"] = "chat_completions"
 
 
