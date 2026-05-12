@@ -177,17 +177,19 @@ export function ModelConfigPage() {
   }
 
   return (
-    <Space direction="vertical" size="large" style={{ display: 'flex', maxWidth: 840, margin: '0 auto' }}>
+    <Space direction="vertical" size="large" style={{ display: 'flex', maxWidth: 1440, margin: '0 auto' }}>
       <div style={{ marginBottom: 16 }}>
         <Text type="secondary" style={{ letterSpacing: 1, fontSize: 12, fontWeight: 600, textTransform: 'uppercase' }}>Gateway Settings</Text>
-        <Title level={2} style={{ margin: '4px 0 8px' }}>模型配置</Title>
+        <Title level={3} style={{ margin: '4px 0 8px' }}>模型配置</Title>
         <Text type="secondary" style={{ fontSize: 15 }}>只需要配置一次。保存后会作为默认生成网关与模型，在后续项目里持续复用。</Text>
       </div>
 
-      <Card 
+      <Row gutter={24}>
+        <Col xs={24} lg={12}>
+      <Card
         title={<><ApiOutlined /> OpenAI-compatible 文本生成配置</>}
-        bordered={false} 
-        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+        bordered={false}
+        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', height: '100%' }}
       >
         <div style={{ marginBottom: 16 }}>
           <Text type="secondary">先获取模型列表，再做一次最小 JSON 生成测试，最后保存为默认配置。</Text>
@@ -246,11 +248,13 @@ export function ModelConfigPage() {
           </div>
         </Form>
       </Card>
+        </Col>
 
-      <Card 
+        <Col xs={24} lg={12}>
+      <Card
         title={<><PictureOutlined /> 生图模型配置</>}
-        bordered={false} 
-        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+        bordered={false}
+        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', height: '100%' }}
       >
         <div style={{ marginBottom: 16 }}>
           <Text type="secondary">配置 OpenAI-compatible 生图网关。填写 URL 和 Key 后获取模型列表，测试通过后保存。</Text>
@@ -317,6 +321,8 @@ export function ModelConfigPage() {
           </div>
         </Form>
       </Card>
+        </Col>
+      </Row>
     </Space>
   );
 }

@@ -50,7 +50,7 @@ export function ReviewExportPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <Text type="secondary" style={{ textTransform: 'uppercase', fontSize: 12, fontWeight: 600, letterSpacing: 1 }}>Export Center</Text>
-            <Title level={2} style={{ margin: '4px 0 8px' }}>审核与导出</Title>
+            <Title level={3} style={{ margin: '4px 0 8px' }}>审核与导出</Title>
             <Text type="secondary">检查总体规划、统一视觉规范和每页 Markdown 生图 prompt。</Text>
           </div>
           <Space wrap>

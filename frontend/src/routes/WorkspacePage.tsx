@@ -87,7 +87,7 @@ export function WorkspacePage() {
       <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <Title level={2} style={{ margin: '0 0 8px' }}>项目工作台</Title>
+            <Title level={3} style={{ margin: '0 0 8px' }}>项目工作台</Title>
             <Text type="secondary">状态：<Tag bordered={false} color="blue">{projectStateLabel(project.generation_state)}</Tag></Text>
           </div>
           <Space wrap>

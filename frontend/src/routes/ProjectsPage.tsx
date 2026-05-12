@@ -98,7 +98,7 @@ export function ProjectsPage() {
     <Space direction="vertical" size="large" style={{ display: 'flex', maxWidth: 1440, margin: '0 auto' }}>
       <div style={{ marginBottom: 16 }}>
         <Text type="secondary" style={{ letterSpacing: 1, fontSize: 12, fontWeight: 600, textTransform: 'uppercase' }}>Control Room</Text>
-        <Title level={2} style={{ margin: '4px 0 8px' }}>项目管理</Title>
+        <Title level={3} style={{ margin: '4px 0 8px' }}>项目管理</Title>
         <Text type="secondary" style={{ fontSize: 15 }}>从历史记录进入任意项目，继续生成、回看大纲、校验一致性，或者直接导出。</Text>
       </div>
 

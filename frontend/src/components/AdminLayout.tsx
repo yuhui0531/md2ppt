@@ -44,9 +44,9 @@ export function AdminLayout() {
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider width={280} theme="light" style={{ borderRight: '1px solid #f0f0f0' }}>
-        <div style={{ padding: '24px 20px' }}>
-          <Text type="secondary" strong style={{ fontSize: 12, letterSpacing: 1 }}>PROMPT CONSOLE</Text>
-          <Title level={4} style={{ margin: '8px 0 16px', fontWeight: 700 }}>Markdown PPT 管理台</Title>
+        <div style={{ padding: '24px 20px 16px' }}>
+          <Text type="secondary" style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>PROMPT CONSOLE</Text>
+          <Title level={3} style={{ margin: '4px 0 8px' }}>MD2PPT管理台</Title>
           <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.6, display: 'block' }}>
             统一管理模型配置、历史项目、生成工作台与审核导出。
           </Text>
@@ -60,7 +60,7 @@ export function AdminLayout() {
         />
       </Sider>
       <Layout>
-        <Content style={{ padding: 0, margin: 0, minHeight: 280, backgroundColor: '#f5f7fa', overflow: 'auto' }}>
+        <Content style={{ padding: '24px 32px 32px', margin: 0, minHeight: 280, backgroundColor: '#f5f7fa', overflow: 'auto' }}>
           <Outlet />
         </Content>
       </Layout>

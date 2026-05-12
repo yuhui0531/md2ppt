@@ -120,7 +120,7 @@ export function ImageGenerationPage() {
       <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <Title level={2} style={{ margin: '0 0 8px' }}>批量生图</Title>
+            <Title level={3} style={{ margin: '0 0 8px' }}>批量生图</Title>
             <Text type="secondary">使用生图模型为每页 Slide 的 Prompt 生成图片</Text>
           </div>
           <Space wrap>
