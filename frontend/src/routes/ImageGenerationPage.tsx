@@ -42,8 +42,12 @@ export function ImageGenerationPage() {
     try {
       const createdJob = await generateImages(project.project_id, { slide_numbers: null });
       setJob(createdJob);
-      await pollAndRefresh(createdJob.job_id);
-      setMessage({ kind: 'success', text: '批量生图完成' });
+      const finalJob = await pollAndRefresh(createdJob.job_id);
+      if (finalJob.error) {
+        setMessage({ kind: 'error', text: `批量生图存在失败：${finalJob.error}` });
+      } else {
+        setMessage({ kind: 'success', text: '批量生图完成' });
+      }
     } catch (error) {
       setMessage({ kind: 'error', text: error instanceof Error ? error.message : '批量生图失败' });
     } finally {
@@ -64,8 +68,12 @@ export function ImageGenerationPage() {
         extra_prompt: retryPrompt.trim() || null,
       });
       setJob(createdJob);
-      await pollAndRefresh(createdJob.job_id);
-      setMessage({ kind: 'success', text: `第${slideNo}页重新生图完成` });
+      const finalJob = await pollAndRefresh(createdJob.job_id);
+      if (finalJob.error) {
+        setMessage({ kind: 'error', text: `第${slideNo}页重试失败：${finalJob.error}` });
+      } else {
+        setMessage({ kind: 'success', text: `第${slideNo}页重新生图完成` });
+      }
     } catch (error) {
       setMessage({ kind: 'error', text: error instanceof Error ? error.message : '重试失败' });
     } finally {
@@ -90,7 +98,7 @@ export function ImageGenerationPage() {
     }
   }
 
-  async function pollAndRefresh(jobId: string) {
+  async function pollAndRefresh(jobId: string): Promise<JobResponse> {
     while (true) {
       await new Promise((resolve) => window.setTimeout(resolve, 2000));
       const latest = await getJob(jobId);
@@ -99,7 +107,7 @@ export function ImageGenerationPage() {
         const updated = await getProject(project.project_id);
         setProject(updated);
       }
-      if (latest.status === 'completed') return;
+      if (latest.status === 'completed') return latest;
       if (latest.status === 'failed') throw new Error(latest.error || '生图失败');
       if (latest.status === 'cancelled') throw new Error('任务已取消');
     }

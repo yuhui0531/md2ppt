@@ -33,7 +33,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Markdown PPT Prompt App", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="MD2PPT", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

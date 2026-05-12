@@ -89,6 +89,24 @@ class ImageGenerationService:
 
         if failed_pages:
             error_msg = f"以下页面生图失败：{failed_pages}"
-            job_service.update(job, stage="completed", progress=1.0, message=f"完成 {completed}/{total} 张", status="completed", error=error_msg)
+            succeeded = total - len(failed_pages)
+            if succeeded == 0:
+                job_service.update(
+                    job,
+                    stage="failed",
+                    progress=1.0,
+                    message=f"全部 {total} 张生图失败",
+                    status="failed",
+                    error=error_msg,
+                )
+            else:
+                job_service.update(
+                    job,
+                    stage="completed",
+                    progress=1.0,
+                    message=f"成功 {succeeded}/{total} 张，{len(failed_pages)} 张失败",
+                    status="completed",
+                    error=error_msg,
+                )
         else:
             job_service.update(job, stage="completed", progress=1.0, message=f"全部 {total} 张生图完成", status="completed")

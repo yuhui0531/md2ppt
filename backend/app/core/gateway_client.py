@@ -1,4 +1,6 @@
-from typing import Any
+from typing import Any, Callable
+
+import json
 
 import httpx
 
@@ -102,6 +104,86 @@ class GatewayClient:
         if not isinstance(content, str):
             raise GatewayError("生成响应缺少 message.content")
         return content
+
+    async def chat_completion_stream(
+        self,
+        model: str,
+        messages: list[dict[str, str]],
+        temperature: float = 0.0,
+        max_tokens: int = 512,
+        on_partial: Callable[[str], None] | None = None,
+    ) -> str:
+        """Streaming chat completion. Accumulates delta.content into a buffer and
+        invokes on_partial(buffer) whenever a delta closes one or more JSON objects
+        (i.e. contains '}'), so callers can do incremental parsing. Returns the
+        final concatenated content string."""
+        url = f"{self.base_url}/v1/chat/completions"
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+            "stream": True,
+        }
+        buffer = ""
+        chunk_count = 0
+        async with httpx.AsyncClient(
+            timeout=_gateway_timeout(),
+            follow_redirects=False,
+        ) as client:
+            try:
+                async with client.stream("POST", url, headers=self._headers(), json=payload) as response:
+                    if response.status_code == 401:
+                        raise GatewayError("API Key 无效或未授权")
+                    if response.status_code >= 400:
+                        body = await response.aread()
+                        raise GatewayError(
+                            f"流式生成请求失败：HTTP {response.status_code} {body[:200].decode('utf-8', 'replace')}"
+                        )
+                    async for line in response.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data_str = line[5:].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            event = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        choices = event.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        delta_content = delta.get("content")
+                        if not isinstance(delta_content, str) or not delta_content:
+                            continue
+                        buffer += delta_content
+                        chunk_count += 1
+                        if on_partial is not None and "}" in delta_content:
+                            try:
+                                on_partial(buffer)
+                            except Exception as cb_exc:
+                                print(f"[gateway] chat_completion_stream on_partial raised {cb_exc.__class__.__name__}: {cb_exc}", flush=True)
+                                raise
+                        if len(buffer) > settings.max_gateway_response_bytes:
+                            raise GatewayError("流式生成响应过大")
+                    elapsed = response.elapsed.total_seconds() if response.elapsed else 0.0
+                    print(
+                        f"[gateway] chat_completion_stream model={model} max_tokens={max_tokens} "
+                        f"chunks={chunk_count} bytes={len(buffer)} elapsed={elapsed:.2f}s",
+                        flush=True,
+                    )
+            except httpx.HTTPError as exc:
+                print(
+                    f"[gateway] chat_completion_stream FAILED model={model} chunks={chunk_count} "
+                    f"bytes={len(buffer)} error={exc.__class__.__name__}: {exc}",
+                    flush=True,
+                )
+                raise GatewayError(f"流式生成请求失败：{exc.__class__.__name__}") from exc
+        if not buffer:
+            raise GatewayError("流式生成响应为空")
+        return buffer
 
     async def image_generation(self, model: str, prompt: str, size: str = "2048x1152", quality: str = "hd") -> str:
         url = f"{self.base_url}/v1/images/generations"

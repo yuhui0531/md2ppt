@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -43,6 +43,45 @@ class GenerationCancelled(Exception):
     pass
 
 
+def _count_complete_slides(buffer: str) -> int:
+    """Walk a partial JSON buffer character by character and count how many
+    complete top-level objects exist inside the `"slides": [...]` array. Handles
+    string literals and escapes; stops at the closing `]` or end of buffer.
+    Returns 0 if no `"slides"` array has started yet."""
+    key_idx = buffer.find('"slides"')
+    if key_idx < 0:
+        return 0
+    bracket_idx = buffer.find("[", key_idx)
+    if bracket_idx < 0:
+        return 0
+    count = 0
+    depth = 0
+    in_string = False
+    escape = False
+    for ch in buffer[bracket_idx + 1:]:
+        if escape:
+            escape = False
+            continue
+        if in_string:
+            if ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0:
+                    count += 1
+        elif ch == "]" and depth == 0:
+            break
+    return count
+
+
 class GenerationService:
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -83,7 +122,7 @@ class GenerationService:
 
         if start_state == "slide_count_recommended":
             self._update_job(job_service, job, "outline_generating", 0.36, "正在让大模型生成 PPT 大纲")
-            data.slides = await self.generate_outline(data)
+            data.slides = await self.generate_outline(data, job_service=job_service, job=job)
             data.style_guide = None
             data.consistency_report = None
             data.generation_state = "outline_generated"
@@ -102,7 +141,7 @@ class GenerationService:
 
         if start_state == "style_guide_generated":
             self._update_job(job_service, job, "prompts_generating", 0.68, "正在让大模型生成逐页 PPT 生图提示词")
-            data.slides = await self.generate_slide_prompts(data)
+            data.slides = await self.generate_slide_prompts(data, job_service=job_service, job=job)
             data.consistency_report = None
             data.generation_state = "prompts_generated"
             self.project_service.save_project_data(data)
@@ -212,7 +251,18 @@ class GenerationService:
         self._validate_slide_count_plan(plan, data.generation_options)
         return plan
 
-    async def generate_outline(self, data: ProjectData) -> list[Slide]:
+    async def generate_outline(
+        self,
+        data: ProjectData,
+        job_service: JobService | None = None,
+        job: JobRecord | None = None,
+    ) -> list[Slide]:
+        expected = data.slide_count_plan.accepted_slide_count if data.slide_count_plan else None
+        on_partial = self._make_slide_progress_callback(
+            job_service, job, stage="outline_generating",
+            base=0.36, span=0.16, expected=expected,
+            message_fn=lambda done, total: f"正在生成大纲：{done}/{total or '?'} 页",
+        )
         payload = await self._call_json(
             "大纲生成",
             OUTLINE_PROMPT,
@@ -223,9 +273,9 @@ class GenerationService:
                 "content_template": data.template,
                 "parsed_sections": [section.model_dump(mode="json") for section in data.parsed_sections],
             },
+            on_partial=on_partial,
         )
         slides = [Slide.model_validate(self._normalize_slide(slide)) for slide in payload.get("slides", [])]
-        expected = data.slide_count_plan.accepted_slide_count if data.slide_count_plan else None
         if expected is not None and len(slides) != expected:
             raise HTTPException(status_code=502, detail=f"模型生成的大纲页数为 {len(slides)}，不等于要求页数 {expected}")
         return slides
@@ -242,8 +292,19 @@ class GenerationService:
         )
         return self._validate_model(StyleGuide, self._normalize_style_guide(payload), "视觉规范")
 
-    async def generate_slide_prompts(self, data: ProjectData, slide_numbers: list[int] | None = None) -> list[Slide]:
+    async def generate_slide_prompts(
+        self,
+        data: ProjectData,
+        slide_numbers: list[int] | None = None,
+        job_service: JobService | None = None,
+        job: JobRecord | None = None,
+    ) -> list[Slide]:
         target_slides = [slide for slide in data.slides if not slide_numbers or slide.slide_no in slide_numbers]
+        on_partial = self._make_slide_progress_callback(
+            job_service, job, stage="prompts_generating",
+            base=0.68, span=0.16, expected=len(target_slides) or None,
+            message_fn=lambda done, total: f"正在生成逐页 Prompt：{done}/{total or '?'} 页",
+        )
         payload = await self._call_json(
             "逐页 prompt 生成",
             SLIDE_PROMPTS_PROMPT,
@@ -252,6 +313,7 @@ class GenerationService:
                 "target_image_tool": data.generation_options.target_image_tool,
                 "slides": [slide.model_dump(mode="json") for slide in target_slides],
             },
+            on_partial=on_partial,
         )
         generated = [Slide.model_validate(self._normalize_slide(slide)) for slide in payload.get("slides", [])]
         if slide_numbers:
@@ -283,6 +345,36 @@ class GenerationService:
     def _update_job(job_service: JobService | None, job: JobRecord | None, stage: str, progress: float, message: str) -> None:
         if job_service and job:
             job_service.update(job, stage=stage, progress=progress, message=message, status="running")
+
+    @classmethod
+    def _make_slide_progress_callback(
+        cls,
+        job_service: JobService | None,
+        job: JobRecord | None,
+        *,
+        stage: str,
+        base: float,
+        span: float,
+        expected: int | None,
+        message_fn: Callable[[int, int | None], str],
+    ) -> Callable[[str], None] | None:
+        if job_service is None or job is None:
+            return None
+        state = {"last_done": 0}
+
+        def callback(buffer: str) -> None:
+            done = _count_complete_slides(buffer)
+            if done <= state["last_done"]:
+                return
+            state["last_done"] = done
+            if expected and expected > 0:
+                ratio = min(done / expected, 1.0)
+            else:
+                ratio = min(done / 12.0, 1.0)  # rough fallback when expected unknown
+            progress = base + ratio * span
+            cls._update_job(job_service, job, stage, progress, message_fn(done, expected))
+
+        return callback
 
     @staticmethod
     def _reset_generation(data: ProjectData) -> ProjectData:
@@ -406,25 +498,42 @@ class GenerationService:
             return "；".join(parts) if parts else json.dumps(value, ensure_ascii=False)
         return str(value)
 
-    async def _call_json(self, stage: str, task_prompt: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _call_json(
+        self,
+        stage: str,
+        task_prompt: str,
+        payload: dict[str, Any],
+        on_partial: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         config = self._require_model_config()
         client = GatewayClient(config.base_url, config.api_key_encrypted)
         request_body = json.dumps(payload, ensure_ascii=False)
         started = time.monotonic()
         print(
-            f"[generation] stage={stage} model={config.selected_model} input_chars={len(request_body)} max_tokens={config.max_tokens}",
+            f"[generation] stage={stage} model={config.selected_model} input_chars={len(request_body)} "
+            f"max_tokens={config.max_tokens} stream={on_partial is not None}",
             flush=True,
         )
         try:
-            content = await client.chat_completion_json(
-                config.selected_model,
-                [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"{task_prompt}\n\n输入 JSON：\n{request_body}"},
-                ],
-                temperature=config.temperature,
-                max_tokens=config.max_tokens,
-            )
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"{task_prompt}\n\n输入 JSON：\n{request_body}"},
+            ]
+            if on_partial is not None:
+                content = await client.chat_completion_stream(
+                    config.selected_model,
+                    messages,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    on_partial=on_partial,
+                )
+            else:
+                content = await client.chat_completion_json(
+                    config.selected_model,
+                    messages,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                )
             print(
                 f"[generation] stage={stage} model={config.selected_model} elapsed={time.monotonic() - started:.1f}s output_chars={len(content)}",
                 flush=True,

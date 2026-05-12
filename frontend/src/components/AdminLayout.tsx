@@ -31,7 +31,7 @@ export function AdminLayout() {
 
   const menuItems = navItems.map((item) => ({
     key: item.key,
-    icon: React.cloneElement(item.icon as React.ReactElement, { style: { fontSize: '18px', marginTop: '6px' } }),
+    icon: React.cloneElement(item.icon as React.ReactElement<{ style?: React.CSSProperties }>, { style: { fontSize: '18px', marginTop: '6px' } }),
     label: (
       <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4', padding: '8px 0' }}>
         <strong style={{ fontSize: '15px' }}>{item.label}</strong>
@@ -42,7 +42,7 @@ export function AdminLayout() {
   }));
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout style={{ minHeight: '100vh', background: '#f5f7fa' }}>
       <Sider width={280} theme="light" style={{ borderRight: '1px solid #f0f0f0' }}>
         <div style={{ padding: '24px 20px 16px' }}>
           <Text type="secondary" style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>PROMPT CONSOLE</Text>
@@ -59,7 +59,7 @@ export function AdminLayout() {
           style={{ borderRight: 0, padding: '0 12px' }}
         />
       </Sider>
-      <Layout>
+      <Layout style={{ background: '#f5f7fa' }}>
         <Content style={{ padding: '24px 32px 32px', margin: 0, minHeight: 280, backgroundColor: '#f5f7fa', overflow: 'auto' }}>
           <Outlet />
         </Content>

@@ -1,4 +1,4 @@
-# Markdown PPT Prompt App (md2ppt)
+# Markdown to PPT App (md2ppt)
 
 [English](README.md) | 中文
 

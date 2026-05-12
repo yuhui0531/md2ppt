@@ -215,14 +215,13 @@ export function WorkspacePage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
                 <Title level={5} style={{ margin: 0 }}>Prompt 工作区</Title>
-                <Text type="secondary" style={{ fontSize: 12 }}>当前页内容、详情与预览切换查看</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>当前页内容与预览切换查看</Text>
               </div>
               <Tabs
                 activeKey={detailView}
                 onChange={setDetailView}
                 items={[
                   { key: 'prompt', label: 'Prompt' },
-                  { key: 'detail', label: '详情' },
                   { key: 'preview', label: '预览' },
                 ]}
                 style={{ marginBottom: 0 }}
@@ -367,7 +366,7 @@ function getSlideSummary(slide: ProjectData['slides'][number]): string {
   ].find(hasText);
 
   if (!summary) {
-    return hasText(slide.page_role) ? slide.page_role : '待补充当前页内容摘要';
+    return hasText(slide.page_role) ? slide.page_role : '';
   }
 
   const normalized = summary.replace(/\s+/g, ' ').trim();

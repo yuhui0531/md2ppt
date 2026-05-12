@@ -1,6 +1,6 @@
 import React from 'react';
 import { Progress, Typography, Alert, Space, Card } from 'antd';
-import { LoadingOutlined, CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
+import { LoadingOutlined, CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled } from '@ant-design/icons';
 import type { JobResponse } from '../types/api';
 import { jobStatusLabel } from '../utils/projectPresentation';
 
@@ -14,21 +14,24 @@ export function JobProgress({ job }: JobProgressProps) {
   if (!job) return null;
   const progress = Math.round((job.progress ?? 0) * 100);
   const isRunning = job.status === 'running';
+  const completedWithErrors = job.status === 'completed' && Boolean(job.error);
 
   const getStatus = () => {
-    if (job.status === 'completed') return 'success';
-    if (job.status === 'failed') return 'exception';
+    if (job.status === 'completed' && !completedWithErrors) return 'success';
+    if (job.status === 'failed' || completedWithErrors) return 'exception';
     if (isRunning) return 'active';
     return 'normal';
   };
 
   const statusIcon = isRunning
     ? <LoadingOutlined spin style={{ color: '#1677ff', fontSize: 18 }} />
-    : job.status === 'completed'
-      ? <CheckCircleFilled style={{ color: '#52c41a', fontSize: 18 }} />
-      : job.status === 'failed'
-        ? <CloseCircleFilled style={{ color: '#ff4d4f', fontSize: 18 }} />
-        : null;
+    : job.status === 'failed'
+      ? <CloseCircleFilled style={{ color: '#ff4d4f', fontSize: 18 }} />
+      : completedWithErrors
+        ? <ExclamationCircleFilled style={{ color: '#faad14', fontSize: 18 }} />
+        : job.status === 'completed'
+          ? <CheckCircleFilled style={{ color: '#52c41a', fontSize: 18 }} />
+          : null;
 
   return (
     <Card
@@ -57,7 +60,12 @@ export function JobProgress({ job }: JobProgressProps) {
         />
 
         {job.error && (
-          <Alert message={job.error} type="error" showIcon style={{ marginTop: 8 }} />
+          <Alert
+            message={job.error}
+            type={completedWithErrors ? 'warning' : 'error'}
+            showIcon
+            style={{ marginTop: 8 }}
+          />
         )}
       </Space>
     </Card>
