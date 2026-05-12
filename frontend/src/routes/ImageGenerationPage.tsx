@@ -146,7 +146,15 @@ export function ImageGenerationPage() {
                     onClick={() => { const idx = galleryImages.findIndex((g) => g.src === slide.image_url); setLightboxIndex(idx >= 0 ? idx : 0); }}
                   />
                 ) : generatingSlides.includes(slide.slide_no) ? (
-                  <div className="image-placeholder generating" />
+                  <div className="image-placeholder generating">
+                    <div className="ant-spin-dot">
+                      <i className="ant-spin-dot-item"></i>
+                      <i className="ant-spin-dot-item"></i>
+                      <i className="ant-spin-dot-item"></i>
+                      <i className="ant-spin-dot-item"></i>
+                    </div>
+                    <span className="generating-text">正在生成...</span>
+                  </div>
                 ) : (
                   <div className="image-placeholder">
                     <span className="muted">{slide.prompt ? '待生成' : '无 Prompt'}</span>
@@ -158,16 +166,17 @@ export function ImageGenerationPage() {
                 {!busy && slide.prompt ? (
                   retryingSlide === slide.slide_no ? (
                     <div className="retry-input-row">
-                      <input
-                        type="text"
+                      <textarea
                         className="retry-input"
                         placeholder="输入改进要求（可选）"
                         value={retryPrompt}
                         onChange={(e) => setRetryPrompt(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleRetrySlide(slide.slide_no); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleRetrySlide(slide.slide_no); } }}
                       />
-                      <button type="button" className="small" onClick={() => handleRetrySlide(slide.slide_no)}>确认</button>
-                      <button type="button" className="secondary small" onClick={() => { setRetryingSlide(null); setRetryPrompt(''); }}>取消</button>
+                      <div className="retry-actions">
+                        <button type="button" className="secondary small" onClick={() => { setRetryingSlide(null); setRetryPrompt(''); }}>取消</button>
+                        <button type="button" className="small" onClick={() => handleRetrySlide(slide.slide_no)}>确认</button>
+                      </div>
                     </div>
                   ) : (
                     <button type="button" className="secondary small" onClick={() => setRetryingSlide(slide.slide_no)}>

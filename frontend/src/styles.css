@@ -1028,45 +1028,55 @@ button.secondary:hover, .button.secondary:hover {
 }
 
 .image-placeholder.generating {
-  background: var(--surface-alt, #f5f5f5);
+  background: #fafafa;
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
 }
 
-.image-placeholder.generating::before {
-  content: '';
+.ant-spin-dot {
+  position: relative;
+  display: inline-block;
+  font-size: 24px;
+  width: 1em;
+  height: 1em;
+  transform: rotate(45deg);
+  animation: antRotate 1.2s infinite linear;
+}
+
+.ant-spin-dot-item {
   position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    135deg,
-    transparent 0%,
-    transparent 40%,
-    rgba(99, 102, 241, 0.08) 50%,
-    transparent 60%,
-    transparent 100%
-  );
-  background-size: 300% 300%;
-  animation: shimmer 2s ease-in-out infinite;
+  display: block;
+  width: 10px;
+  height: 10px;
+  background-color: #1677ff;
+  border-radius: 100%;
+  transform: scale(0.75);
+  transform-origin: 50% 50%;
+  opacity: 0.3;
+  animation: antSpinMove 1s infinite linear alternate;
 }
 
-.image-placeholder.generating::after {
-  content: '';
-  width: 32px;
-  height: 32px;
-  border: 3px solid rgba(99, 102, 241, 0.15);
-  border-top-color: rgba(99, 102, 241, 0.6);
-  border-radius: 50%;
-  animation: spin 0.9s linear infinite;
+.ant-spin-dot-item:nth-child(1) { top: 0; left: 0; }
+.ant-spin-dot-item:nth-child(2) { top: 0; right: 0; animation-delay: 0.4s; }
+.ant-spin-dot-item:nth-child(3) { right: 0; bottom: 0; animation-delay: 0.8s; }
+.ant-spin-dot-item:nth-child(4) { bottom: 0; left: 0; animation-delay: 1.2s; }
+
+@keyframes antRotate {
+  to { transform: rotate(405deg); }
 }
 
-@keyframes shimmer {
-  0% { background-position: 100% 100%; }
-  100% { background-position: 0% 0%; }
+@keyframes antSpinMove {
+  to { opacity: 1; }
 }
 
-@keyframes skeleton-pulse {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+.generating-text {
+  color: #1677ff;
+  font-size: 14px;
 }
 
 .image-card-footer {
@@ -1079,15 +1089,46 @@ button.secondary:hover, .button.secondary:hover {
 
 .retry-input-row {
   display: flex;
-  gap: 0.5rem;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  width: 100%;
 }
 
-.retry-input-row input {
-  flex: 1;
-  font-size: 0.75rem;
-  padding: 6px 10px;
-  min-width: 0;
+.retry-input-row textarea.retry-input {
+  width: 100%;
+  font-size: 13px;
+  padding: 8px 12px;
+  min-height: 80px;
+  resize: vertical;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  transition: all 0.2s;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.retry-input-row textarea.retry-input:hover {
+  border-color: #4096ff;
+}
+
+.retry-input-row textarea.retry-input:focus {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1);
+  outline: none;
+}
+
+.retry-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.retry-actions button {
+  font-size: 13px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  min-height: 28px;
 }
 
 .image-prompt-preview {
