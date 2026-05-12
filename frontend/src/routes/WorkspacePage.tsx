@@ -1,5 +1,5 @@
+import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useEffect, useState } from 'react';
 import { getProject } from '../api/projects';
 import { checkConsistency, generateProject, regeneratePrompts, reviseInconsistentPrompts } from '../api/generation';
 import { ConsistencyReportView } from '../components/ConsistencyReportView';
@@ -12,11 +12,17 @@ import type { JobResponse, ProjectData } from '../types/api';
 import { pollJobUntilFinished } from '../utils/jobPolling';
 import { projectStateLabel } from '../utils/projectPresentation';
 
+import { Card, Col, Row, Typography, Button, Space, Tabs, Tag, Alert, Spin, Input } from 'antd';
+import { PictureOutlined, CheckCircleOutlined, ExportOutlined, PlayCircleOutlined, SyncOutlined } from '@ant-design/icons';
+
+const { Title, Text, Paragraph } = Typography;
+const { TextArea } = Input;
+
 export function WorkspacePage() {
   const { projectId } = useParams<{ projectId: string }>();
   const { project, setProject } = useProjectStore();
   const [activeSlide, setActiveSlide] = useState(0);
-  const [detailView, setDetailView] = useState<'prompt' | 'preview'>('prompt');
+  const [detailView, setDetailView] = useState('prompt');
   const [busy, setBusy] = useState<string | null>(null);
   const [job, setJob] = useState<JobResponse | null>(null);
   const [message, setMessage] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(null);
@@ -60,7 +66,7 @@ export function WorkspacePage() {
   }
 
   if (!project || project.project_id !== projectId) {
-    return <main className="admin-page"><StatusMessage>正在加载项目...</StatusMessage></main>;
+    return <main className="admin-page" style={{ padding: 24, textAlign: 'center' }}><Spin size="large" tip="正在加载项目..." /></main>;
   }
 
   const slide = project.slides[activeSlide];
@@ -77,165 +83,248 @@ export function WorkspacePage() {
   const hasSlideSummary = hasText(slide?.core_message) || slideModules.length > 0 || slideVisualElements.length > 0 || slideTextHierarchy.length > 0;
 
   return (
-    <main className="admin-page stack">
-      <section className="card header-card">
-        <div>
-          <h1>项目工作台</h1>
-          <p className="muted">状态：{projectStateLabel(project.generation_state)}</p>
+    <Space direction="vertical" size="large" style={{ display: 'flex', maxWidth: 1600, margin: '0 auto', paddingBottom: 40 }}>
+      <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+          <div>
+            <Title level={2} style={{ margin: '0 0 8px' }}>项目工作台</Title>
+            <Text type="secondary">状态：<Tag bordered={false} color="blue">{projectStateLabel(project.generation_state)}</Tag></Text>
+          </div>
+          <Space wrap>
+            {canResume && (
+              <Button icon={<PlayCircleOutlined />} onClick={resumeGeneration} disabled={busy !== null} loading={busy === '继续生成'}>
+                继续生成
+              </Button>
+            )}
+            <Link to={`/workspace/${project.project_id}/images`}>
+              <Button icon={<PictureOutlined />}>批量生图</Button>
+            </Link>
+            <Link to={`/review/${project.project_id}`}>
+              <Button type="primary" icon={<ExportOutlined />}>审核与导出</Button>
+            </Link>
+          </Space>
         </div>
-        <div className="actions">
-          {canResume ? <button type="button" className="secondary" disabled={busy !== null} onClick={resumeGeneration}>继续生成</button> : null}
-          <Link className="button secondary" to={`/workspace/${project.project_id}/images`}>批量生图</Link>
-          <Link className="button" to={`/review/${project.project_id}`}>审核与导出</Link>
-        </div>
-      </section>
+      </Card>
 
-      {message ? <StatusMessage kind={message.kind}>{message.text}</StatusMessage> : null}
+      {message && (
+        <Alert message={message.text} type={message.kind === 'error' ? 'error' : (message.kind === 'success' ? 'success' : 'info')} showIcon />
+      )}
       <JobProgress job={job} />
 
-      <section className="card stack material-card">
-        <div className="workspace-section-head">
-          <h2>素材结构</h2>
-          <span className="section-count">共 {project.parsed_sections.length} 段</span>
-        </div>
-        <div className="material-grid">
-          {project.parsed_sections.map((section) => (
-            <article className="material-block" key={section.id}>
-              <div className="material-block-head">
-                <span className="material-level">L{section.level}</span>
-                <strong>{section.heading}</strong>
-              </div>
-              <p>{section.content.slice(0, 140)}{section.content.length > 140 ? '...' : ''}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="workspace-main">
-        <div className="card stack outline-card">
-          <div className="outline-card-header">
-            <h2>页数与大纲</h2>
-            <span className="section-count">共 {project.slides.length} 页</span>
-          </div>
-          {project.slide_count_plan ? (
-            <div className="outline-summary">
-              <div className="outline-summary-top">
-                <div className="outline-summary-copy">
-                  <span>推荐页数</span>
-                  <strong>{project.slide_count_plan.accepted_slide_count} 页</strong>
+      {/* Main Layout: Left/Right */}
+      <Row gutter={[24, 24]} align="stretch">
+        
+        {/* Left Column: Outline & Materials */}
+        <Col xs={24} lg={8} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <Card 
+            title={<><span style={{ marginRight: 8 }}>素材结构</span><Tag bordered={false}>共 {project.parsed_sections.length} 段</Tag></>} 
+            bordered={false} 
+            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+            bodyStyle={{ maxHeight: 300, overflowY: 'auto' }}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+              {project.parsed_sections.map((section) => (
+                <div key={section.id} style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <Tag color="cyan" style={{ margin: 0 }}>L{section.level}</Tag>
+                    <Text strong ellipsis>{section.heading}</Text>
+                  </div>
+                  <Paragraph type="secondary" style={{ margin: 0, fontSize: 13 }} ellipsis={{ rows: 2 }}>
+                    {section.content}
+                  </Paragraph>
                 </div>
-              </div>
-              <small>{project.slide_count_plan.coverage_summary || project.slide_count_plan.reason}</small>
+              ))}
             </div>
-          ) : null}
-          <div className="slide-list outline-list tall-list">
-            {project.slides.map((item, index) => (
-              <button type="button" className={index === activeSlide ? 'active' : ''} key={item.slide_no} onClick={() => setActiveSlide(index)}>
-                <span className="outline-item-copy">
-                  <span className="outline-item-main">
-                    <span className="outline-item-title">{getSlideLabel(item)}</span>
-                  </span>
-                  <span className="outline-item-summary">{getSlideSummary(item)}</span>
-                </span>
-                <small>{item.page_type}</small>
-              </button>
-            ))}
-          </div>
-        </div>
+          </Card>
 
-        <div className="workspace-detail stack">
-          <section className="card stack current-slide-card">
-            <div className="header-card compact-row">
-              <div className="current-slide-heading">
-                <h2 className="current-slide-title">{slide ? getCurrentSlideHeading(slide) : '当前页详情'}</h2>
+          <Card 
+            title={<><span style={{ marginRight: 8 }}>页数与大纲</span><Tag bordered={false}>共 {project.slides.length} 页</Tag></>} 
+            bordered={false} 
+            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', flex: 1, display: 'flex', flexDirection: 'column' }}
+            bodyStyle={{ padding: '0 0 16px 0', flex: 1, display: 'flex', flexDirection: 'column', maxHeight: 600, overflow: 'hidden' }}
+          >
+            {project.slide_count_plan && (
+              <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', background: '#fdfdfd' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <Text type="secondary">推荐页数</Text>
+                  <Text strong>{project.slide_count_plan.accepted_slide_count} 页</Text>
+                </div>
+                <Text type="secondary" style={{ fontSize: 12 }}>{project.slide_count_plan.coverage_summary || project.slide_count_plan.reason}</Text>
               </div>
-              <div className="actions">
-                <button type="button" className="secondary" disabled={!slide || busy !== null} onClick={() => refreshWith(() => regeneratePrompts(project.project_id, [slide!.slide_no]), '已重新生成当前页 prompt')}>重生成当前页</button>
-              </div>
-            </div>
-
-            {slide ? (
-              <>
-                {slideMetaItems.length ? (
-                  <div className="slide-meta-grid">
-                    {slideMetaItems.map((item) => (
-                      <div className="metric" key={item.label}>
-                        <span>{item.label}</span>
-                        <strong className="metric-label">{item.value}</strong>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                {hasSlideSummary ? (
-                  <div className="slide-summary-card">
-                    {hasText(slide.core_message) ? (
-                      <>
-                        <h3>核心信息</h3>
-                        <p className="slide-core-message">{slide.core_message}</p>
-                      </>
-                    ) : null}
-                    <div className="slide-summary-grid">
-                      <DetailList title="模块" items={slideModules} />
-                      <DetailList title="视觉元素" items={slideVisualElements} />
-                      <DetailList title="文字层级" items={slideTextHierarchy} />
-                    </div>
-                  </div>
-                ) : null}
-
-                {slidePageText.length ? (
-                  <div className="slide-summary-card">
-                    <h3>页面文案</h3>
-                    <div className="text-snippets">
-                      {slidePageText.map((text) => (
-                        <p key={text}>{text}</p>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            ) : null}
-          </section>
-
-          <section className="card stack detail-workbench">
-            <div className="detail-workbench-head">
-              <div>
-                <h2>Prompt 工作区</h2>
-                <p className="muted">当前页内容与预览切换查看。</p>
-              </div>
-              <div className="tabs">
-                <button type="button" className={detailView === 'prompt' ? 'active' : ''} onClick={() => setDetailView('prompt')}>Prompt</button>
-                <button type="button" className={detailView === 'preview' ? 'active' : ''} onClick={() => setDetailView('preview')}>预览</button>
-              </div>
-            </div>
-
-            {detailView === 'prompt' ? (
-              <textarea className="editor prompt workspace-prompt" readOnly value={slide?.prompt ?? ''} />
-            ) : (
-              <MarkdownPreview content={slide?.prompt ?? ''} />
             )}
-          </section>
-        </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {project.slides.map((item, index) => (
+                <div 
+                  key={item.slide_no} 
+                  onClick={() => setActiveSlide(index)}
+                  style={{ 
+                    padding: '16px 24px', 
+                    cursor: 'pointer', 
+                    borderBottom: '1px solid #f0f0f0',
+                    background: index === activeSlide ? '#e6f4ff' : 'transparent',
+                    borderLeft: index === activeSlide ? '3px solid #1677ff' : '3px solid transparent',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text strong style={{ color: index === activeSlide ? '#1677ff' : 'inherit' }}>{getSlideLabel(item)}</Text>
+                    <Tag bordered={false} color={index === activeSlide ? 'blue' : 'default'} style={{ margin: 0, fontSize: 11 }}>{item.page_type}</Tag>
+                  </div>
+                  <Text type="secondary" style={{ fontSize: 13, display: 'block' }}>{getSlideSummary(item)}</Text>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </Col>
 
-        <aside className="card stack consistency-card">
-          <div className="workspace-section-head">
-            <h2>风格一致性</h2>
-          </div>
-          <div className="actions wrap consistency-actions">
-            <button type="button" className="secondary" disabled={busy !== null} onClick={() => refreshWith(() => checkConsistency(project.project_id, project.generation_options.consistency_threshold), '一致性检查已完成')}>检查一致性</button>
-            <button type="button" disabled={busy !== null} onClick={() => refreshWith(() => reviseInconsistentPrompts(project.project_id, project.generation_options.consistency_threshold), '不一致页面已修正')}>修正不一致</button>
-          </div>
-          <ConsistencyReportView report={project.consistency_report} />
-        </aside>
-      </section>
+        {/* Right Column: Consistency, Slide Details, Prompt */}
+        <Col xs={24} lg={16} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          
+          <Row gutter={[24, 24]}>
+            <Col xs={24} xl={16} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              <Card 
+                bordered={false} 
+                style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+                bodyStyle={{ padding: 24 }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+                  <Title level={3} style={{ margin: 0 }}>{slide ? getCurrentSlideHeading(slide) : '当前页详情'}</Title>
+                  <Button 
+                    icon={<SyncOutlined />} 
+                    disabled={!slide || busy !== null} 
+                    loading={busy === '已重新生成当前页 prompt'}
+                    onClick={() => refreshWith(() => regeneratePrompts(project.project_id, [slide!.slide_no]), '已重新生成当前页 prompt')}
+                  >
+                    重生成当前页
+                  </Button>
+                </div>
 
-      <section className="card stack style-guide-card">
-        <div className="workspace-section-head">
-          <h2>统一视觉规范</h2>
-        </div>
+                {slide && (
+                  <Space direction="vertical" size="large" style={{ width: '100%' }}>
+                    {slideMetaItems.length > 0 && (
+                      <Row gutter={[16, 16]}>
+                        {slideMetaItems.map((item) => (
+                          <Col key={item.label} xs={12} sm={8}>
+                            <div style={{ background: '#f8fafc', padding: '8px 16px', borderRadius: 8 }}>
+                              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 2 }}>{item.label}</Text>
+                              <Text strong>{item.value}</Text>
+                            </div>
+                          </Col>
+                        ))}
+                      </Row>
+                    )}
+
+                    {hasSlideSummary && (
+                      <div style={{ background: '#f8fafc', padding: 20, borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                        {hasText(slide.core_message) && (
+                          <div style={{ marginBottom: 16 }}>
+                            <Text type="secondary" style={{ fontSize: 12, fontWeight: 600 }}>核心信息</Text>
+                            <Paragraph style={{ margin: '4px 0 0', fontSize: 15 }}>{slide.core_message}</Paragraph>
+                          </div>
+                        )}
+                        
+                        <Row gutter={[24, 24]}>
+                          <Col xs={24} sm={8}><DetailList title="模块" items={slideModules} /></Col>
+                          <Col xs={24} sm={8}><DetailList title="视觉元素" items={slideVisualElements} /></Col>
+                          <Col xs={24} sm={8}><DetailList title="文字层级" items={slideTextHierarchy} /></Col>
+                        </Row>
+                      </div>
+                    )}
+
+                    {slidePageText.length > 0 && (
+                      <div style={{ background: '#f8fafc', padding: 20, borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                        <Text type="secondary" style={{ fontSize: 12, fontWeight: 600 }}>页面文案</Text>
+                        <div style={{ marginTop: 8 }}>
+                          {slidePageText.map((text, i) => (
+                            <Paragraph key={i} style={{ marginBottom: i === slidePageText.length - 1 ? 0 : 8 }}>{text}</Paragraph>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </Space>
+                )}
+              </Card>
+
+              <Card 
+                bordered={false} 
+                style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', flex: 1, display: 'flex', flexDirection: 'column' }}
+                bodyStyle={{ padding: 24, flex: 1, display: 'flex', flexDirection: 'column' }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <div>
+                    <Title level={4} style={{ margin: 0 }}>Prompt 工作区</Title>
+                    <Text type="secondary" style={{ fontSize: 13 }}>当前页内容与预览切换查看</Text>
+                  </div>
+                  <Tabs 
+                    activeKey={detailView} 
+                    onChange={setDetailView} 
+                    items={[
+                      { key: 'prompt', label: 'Prompt' },
+                      { key: 'preview', label: '预览' }
+                    ]}
+                    style={{ marginBottom: 0 }}
+                  />
+                </div>
+
+                <div style={{ flex: 1, minHeight: 300, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', padding: detailView === 'prompt' ? 0 : 16, overflow: 'auto' }}>
+                  {detailView === 'prompt' ? (
+                    <TextArea 
+                      readOnly 
+                      value={slide?.prompt ?? ''} 
+                      style={{ height: '100%', resize: 'none', border: 'none', background: 'transparent', padding: 16, fontFamily: 'monospace' }} 
+                    />
+                  ) : (
+                    <MarkdownPreview content={slide?.prompt ?? ''} />
+                  )}
+                </div>
+              </Card>
+            </Col>
+            
+            <Col xs={24} xl={8}>
+              <Card 
+                title="风格一致性" 
+                bordered={false} 
+                style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%' }}
+                bodyStyle={{ padding: 24, maxHeight: 800, overflowY: 'auto' }}
+              >
+                <Space direction="vertical" style={{ width: '100%', marginBottom: 24 }}>
+                  <Button 
+                    block 
+                    icon={<CheckCircleOutlined />} 
+                    disabled={busy !== null} 
+                    loading={busy === '一致性检查已完成'}
+                    onClick={() => refreshWith(() => checkConsistency(project.project_id, project.generation_options.consistency_threshold), '一致性检查已完成')}
+                  >
+                    检查一致性
+                  </Button>
+                  <Button 
+                    block 
+                    type="primary" 
+                    ghost 
+                    disabled={busy !== null} 
+                    loading={busy === '不一致页面已修正'}
+                    onClick={() => refreshWith(() => reviseInconsistentPrompts(project.project_id, project.generation_options.consistency_threshold), '不一致页面已修正')}
+                  >
+                    修正不一致
+                  </Button>
+                </Space>
+                
+                <ConsistencyReportView report={project.consistency_report} />
+              </Card>
+            </Col>
+          </Row>
+        </Col>
+      </Row>
+
+      {/* Bottom Area: Style Guide */}
+      <Card 
+        title="统一视觉规范" 
+        bordered={false} 
+        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', marginTop: 8 }}
+      >
         <StyleGuidePanel styleGuide={project.style_guide} />
-      </section>
-    </main>
+      </Card>
+    </Space>
   );
 }
 
@@ -245,13 +334,13 @@ function DetailList({ title, items }: { title: string; items: string[] }) {
   }
 
   return (
-    <div className="detail-list">
-      <h3>{title}</h3>
-      <div className="tags neutral">
+    <div>
+      <Text type="secondary" style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>{title}</Text>
+      <Space wrap size={[0, 8]}>
         {items.map((item) => (
-          <span className="tag" key={item}>{item}</span>
+          <Tag key={item} bordered={false} style={{ background: '#e2e8f0', color: '#334155', margin: '0 8px 0 0' }}>{item}</Tag>
         ))}
-      </div>
+      </Space>
     </div>
   );
 }

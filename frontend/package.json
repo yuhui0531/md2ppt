@@ -5,16 +5,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.2.2",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "typescript": "latest",
+    "antd": "^6.3.7",
     "react": "latest",
     "react-dom": "latest",
-    "react-router-dom": "latest",
-    "zustand": "latest",
     "react-markdown": "latest",
+    "react-router-dom": "latest",
+    "rehype-sanitize": "latest",
     "remark-gfm": "latest",
-    "rehype-sanitize": "latest"
+    "typescript": "latest",
+    "vite": "latest",
+    "zustand": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",

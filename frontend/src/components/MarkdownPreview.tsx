@@ -8,7 +8,7 @@ interface MarkdownPreviewProps {
 
 export function MarkdownPreview({ content }: MarkdownPreviewProps) {
   return (
-    <div className="markdown-preview">
+    <div className="markdown-preview ant-typography">
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
         {content || '暂无内容'}
       </ReactMarkdown>

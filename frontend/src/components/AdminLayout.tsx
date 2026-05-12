@@ -1,59 +1,69 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import React from 'react';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Layout, Menu, Typography, theme } from 'antd';
+import { PlusSquareOutlined, FolderOpenOutlined, SettingOutlined } from '@ant-design/icons';
+
+const { Sider, Content } = Layout;
+const { Title, Text } = Typography;
 
 const navItems = [
-  { to: '/projects/new', label: '新建项目', caption: '上传素材并开始生成' },
-  { to: '/projects', label: '项目管理', caption: '历史项目与继续处理', end: true },
-  { to: '/settings/model', label: '模型配置', caption: '网关、模型与生成参数' },
+  { key: '/projects/new', label: '新建项目', icon: <PlusSquareOutlined />, caption: '上传素材并开始生成' },
+  { key: '/projects', label: '项目管理', icon: <FolderOpenOutlined />, caption: '历史项目与继续处理' },
+  { key: '/settings/model', label: '模型配置', icon: <SettingOutlined />, caption: '网关、模型与生成参数' },
 ];
 
 export function AdminLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
 
-  function isNavItemActive(path: string): boolean {
-    if (path === '/projects') {
-      return location.pathname === '/projects'
-        || location.pathname.startsWith('/workspace/')
-        || location.pathname.startsWith('/review/');
+  function getActiveKey() {
+    if (location.pathname.startsWith('/projects/new')) return '/projects/new';
+    if (location.pathname.startsWith('/settings/model')) return '/settings/model';
+    if (
+      location.pathname.startsWith('/projects') ||
+      location.pathname.startsWith('/workspace/') ||
+      location.pathname.startsWith('/review/')
+    ) {
+      return '/projects';
     }
-
-    if (path === '/projects/new') {
-      return location.pathname === '/projects/new';
-    }
-
-    if (path === '/settings/model') {
-      return location.pathname === '/settings/model';
-    }
-
-    return location.pathname === path;
+    return location.pathname;
   }
 
-  return (
-    <div className="admin-shell">
-      <aside className="admin-sidebar">
-        <div className="brand-block">
-          <p className="brand-kicker">Prompt Console</p>
-          <h1>Markdown PPT 管理台</h1>
-          <p className="brand-copy">统一管理模型配置、历史项目、生成工作台与审核导出。</p>
-        </div>
-
-        <nav className="admin-nav">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={() => `admin-nav-item${isNavItemActive(item.to) ? ' active' : ''}`}
-            >
-              <strong>{item.label}</strong>
-              <span>{item.caption}</span>
-            </NavLink>
-          ))}
-        </nav>
-      </aside>
-
-      <div className="admin-main">
-        <Outlet />
+  const menuItems = navItems.map((item) => ({
+    key: item.key,
+    icon: React.cloneElement(item.icon as React.ReactElement, { style: { fontSize: '18px', marginTop: '6px' } }),
+    label: (
+      <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4', padding: '8px 0' }}>
+        <strong style={{ fontSize: '15px' }}>{item.label}</strong>
+        <span style={{ fontSize: '12px', color: '#8c8c8c' }}>{item.caption}</span>
       </div>
-    </div>
+    ),
+    style: { height: 'auto', padding: '12px 16px', lineHeight: 'normal' }
+  }));
+
+  return (
+    <Layout style={{ minHeight: '100vh' }}>
+      <Sider width={280} theme="light" style={{ borderRight: '1px solid #f0f0f0' }}>
+        <div style={{ padding: '24px 20px' }}>
+          <Text type="secondary" strong style={{ fontSize: 12, letterSpacing: 1 }}>PROMPT CONSOLE</Text>
+          <Title level={4} style={{ margin: '8px 0 16px', fontWeight: 700 }}>Markdown PPT 管理台</Title>
+          <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.6, display: 'block' }}>
+            统一管理模型配置、历史项目、生成工作台与审核导出。
+          </Text>
+        </div>
+        <Menu
+          mode="inline"
+          selectedKeys={[getActiveKey()]}
+          onClick={({ key }) => navigate(key)}
+          items={menuItems}
+          style={{ borderRight: 0, padding: '0 12px' }}
+        />
+      </Sider>
+      <Layout>
+        <Content style={{ padding: 0, margin: 0, minHeight: 280, backgroundColor: '#f5f7fa', overflow: 'auto' }}>
+          <Outlet />
+        </Content>
+      </Layout>
+    </Layout>
   );
 }

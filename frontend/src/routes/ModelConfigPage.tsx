@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { FormField } from '../components/FormField';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StatusMessage } from '../components/StatusMessage';
 import { getModelConfig, getImageModelConfig, listModels, saveModelConfig, saveImageModelConfig, testGeneration, testImageGeneration } from '../api/modelConfig';
 import type { ModelInfo } from '../types/api';
+
+import { Card, Col, Row, Typography, Input, InputNumber, Select, Button, Space, Form, Alert } from 'antd';
+import { ApiOutlined, PictureOutlined } from '@ant-design/icons';
+
+const { Title, Text } = Typography;
 
 export function ModelConfigPage() {
   const [baseUrl, setBaseUrl] = useState('');
@@ -173,128 +177,146 @@ export function ModelConfigPage() {
   }
 
   return (
-    <main className="admin-page stack">
-      <section className="hero-panel">
-        <div className="hero-copy">
-          <p className="eyebrow">Gateway Settings</p>
-          <h2>模型配置</h2>
-          <p>只需要配置一次。保存后会作为默认生成网关与模型，在后续项目里持续复用。</p>
-        </div>
-      </section>
+    <Space direction="vertical" size="large" style={{ display: 'flex', maxWidth: 840, margin: '0 auto' }}>
+      <div style={{ marginBottom: 16 }}>
+        <Text type="secondary" style={{ letterSpacing: 1, fontSize: 12, fontWeight: 600, textTransform: 'uppercase' }}>Gateway Settings</Text>
+        <Title level={2} style={{ margin: '4px 0 8px' }}>模型配置</Title>
+        <Text type="secondary" style={{ fontSize: 15 }}>只需要配置一次。保存后会作为默认生成网关与模型，在后续项目里持续复用。</Text>
+      </div>
 
-      <section className="card stack panel-shell">
-        <div className="section-head">
-          <div>
-            <h2>OpenAI-compatible 配置</h2>
-            <p className="muted">先获取模型列表，再做一次最小 JSON 生成测试，最后保存为默认配置。</p>
+      <Card 
+        title={<><ApiOutlined /> OpenAI-compatible 文本生成配置</>}
+        bordered={false} 
+        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text type="secondary">先获取模型列表，再做一次最小 JSON 生成测试，最后保存为默认配置。</Text>
+        </div>
+
+        {message && (
+          <Alert message={message.text} type={message.kind === 'error' ? 'error' : (message.kind === 'success' ? 'success' : 'info')} showIcon style={{ marginBottom: 24 }} />
+        )}
+
+        <Form layout="vertical">
+          <Form.Item label="Base URL" extra="例如：https://your-gateway.example.com。默认会拒绝 localhost、内网和 metadata 地址。">
+            <Input value={baseUrl} onChange={(e) => { setBaseUrl(e.target.value); setTested(false); }} placeholder="https://..." />
+          </Form.Item>
+
+          <Form.Item label="API Key" extra="API Key 只发送给后端，不会进入导出文件。">
+            <Input.Password value={apiKey} onChange={(e) => { setApiKey(e.target.value); setTested(false); }} placeholder="sk-..." />
+          </Form.Item>
+
+          <Form.Item>
+            <Button onClick={handleListModels} disabled={!canFetchModels || busy !== null} loading={busy === 'models'}>
+              {busy === 'models' ? '获取中...' : '获取模型列表'}
+            </Button>
+          </Form.Item>
+
+          <Form.Item label="默认模型">
+            <Select value={selectedModel} onChange={(value) => { setSelectedModel(value); setTested(false); }} placeholder="请选择模型">
+              {selectedModel && !models.some((model) => model.id === selectedModel) && (
+                <Select.Option value={selectedModel}>{selectedModel}</Select.Option>
+              )}
+              {models.map((model) => (
+                <Select.Option key={model.id} value={model.id}>{model.id}</Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="Temperature">
+                <InputNumber min={0} max={2} step={0.1} value={temperature} onChange={(val) => setTemperature(val || 0)} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Max Tokens">
+                <InputNumber min={1} value={maxTokens} onChange={(val) => setMaxTokens(val || 8192)} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+            <Button onClick={handleTestGeneration} disabled={!canTest || busy !== null} loading={busy === 'test'}>
+              {busy === 'test' ? '测试中...' : '测试生成'}
+            </Button>
+            <Button type="primary" onClick={handleSave} disabled={!canSave || busy !== null} loading={busy === 'save'}>
+              {busy === 'save' ? '保存中...' : '保存配置'}
+            </Button>
           </div>
+        </Form>
+      </Card>
+
+      <Card 
+        title={<><PictureOutlined /> 生图模型配置</>}
+        bordered={false} 
+        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text type="secondary">配置 OpenAI-compatible 生图网关。填写 URL 和 Key 后获取模型列表，测试通过后保存。</Text>
         </div>
 
-        {message ? <StatusMessage kind={message.kind}>{message.text}</StatusMessage> : null}
+        {imgMessage && (
+          <Alert message={imgMessage.text} type={imgMessage.kind === 'error' ? 'error' : (imgMessage.kind === 'success' ? 'success' : 'info')} showIcon style={{ marginBottom: 24 }} />
+        )}
 
-        <FormField label="Base URL" hint="例如：https://your-gateway.example.com。默认会拒绝 localhost、内网和 metadata 地址。">
-          <input value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); setTested(false); }} placeholder="https://..." />
-        </FormField>
+        <Form layout="vertical">
+          <Form.Item label="Base URL" extra="生图服务的 API 地址，例如：https://api.openai.com">
+            <Input value={imgBaseUrl} onChange={(e) => { setImgBaseUrl(e.target.value); setImgTested(false); }} placeholder="https://..." />
+          </Form.Item>
 
-        <FormField label="API Key" hint="API Key 只发送给后端，不会进入导出文件。">
-          <input value={apiKey} onChange={(event) => { setApiKey(event.target.value); setTested(false); }} placeholder="sk-..." type="password" />
-        </FormField>
+          <Form.Item label="API Key" extra="生图服务的 API Key。">
+            <Input.Password value={imgApiKey} onChange={(e) => { setImgApiKey(e.target.value); setImgTested(false); }} placeholder="sk-..." />
+          </Form.Item>
 
-        <div className="actions">
-          <button type="button" onClick={handleListModels} disabled={!canFetchModels || busy !== null}>
-            {busy === 'models' ? '获取中...' : '获取模型列表'}
-          </button>
-        </div>
+          <Form.Item>
+            <Button onClick={handleListImgModels} disabled={!canFetchImgModels || imgBusy !== null} loading={imgBusy === 'models'}>
+              {imgBusy === 'models' ? '获取中...' : '获取模型列表'}
+            </Button>
+          </Form.Item>
 
-        <FormField label="默认模型">
-          <select value={selectedModel} onChange={(event) => { setSelectedModel(event.target.value); setTested(false); }}>
-            {selectedModel && !models.some((model) => model.id === selectedModel) ? <option value={selectedModel}>{selectedModel}</option> : null}
-            <option value="">请选择模型</option>
-            {models.map((model) => (
-              <option key={model.id} value={model.id}>{model.id}</option>
-            ))}
-          </select>
-        </FormField>
+          <Form.Item label="生图模型">
+            <Select value={imgSelectedModel} onChange={(value) => { setImgSelectedModel(value); setImgTested(false); }} placeholder="请选择模型">
+              {imgSelectedModel && !imgModels.some((model) => model.id === imgSelectedModel) && (
+                <Select.Option value={imgSelectedModel}>{imgSelectedModel}</Select.Option>
+              )}
+              {imgModels.map((model) => (
+                <Select.Option key={model.id} value={model.id}>{model.id}</Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
 
-        <div className="grid two">
-          <FormField label="Temperature">
-            <input type="number" min="0" max="2" step="0.1" value={temperature} onChange={(event) => setTemperature(Number(event.target.value))} />
-          </FormField>
-          <FormField label="Max Tokens">
-            <input type="number" min="1" value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} />
-          </FormField>
-        </div>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="默认尺寸">
+                <Select value={imgSize} onChange={setImgSize}>
+                  <Select.Option value="2048x1152">2048x1152 (16:9)</Select.Option>
+                  <Select.Option value="1024x1024">1024x1024 (1:1)</Select.Option>
+                  <Select.Option value="1792x1024">1792x1024</Select.Option>
+                  <Select.Option value="1024x1792">1024x1792</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="质量">
+                <Select value={imgQuality} onChange={setImgQuality}>
+                  <Select.Option value="hd">hd</Select.Option>
+                  <Select.Option value="standard">standard</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
 
-        <div className="actions">
-          <button type="button" className="secondary" onClick={handleTestGeneration} disabled={!canTest || busy !== null}>
-            {busy === 'test' ? '测试中...' : '测试生成'}
-          </button>
-          <button type="button" onClick={handleSave} disabled={!canSave || busy !== null}>
-            {busy === 'save' ? '保存中...' : '保存配置'}
-          </button>
-        </div>
-      </section>
-
-      <section className="card stack panel-shell">
-        <div className="section-head">
-          <div>
-            <h2>生图模型配置</h2>
-            <p className="muted">配置 OpenAI-compatible 生图网关。填写 URL 和 Key 后获取模型列表，测试通过后保存。</p>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+            <Button onClick={handleTestImageGeneration} disabled={!canTestImg || imgBusy !== null} loading={imgBusy === 'test'}>
+              {imgBusy === 'test' ? '测试中...' : '测试生图'}
+            </Button>
+            <Button type="primary" onClick={handleSaveImageConfig} disabled={!canSaveImg || imgBusy !== null} loading={imgBusy === 'save'}>
+              {imgBusy === 'save' ? '保存中...' : '保存配置'}
+            </Button>
           </div>
-        </div>
-
-        {imgMessage ? <StatusMessage kind={imgMessage.kind}>{imgMessage.text}</StatusMessage> : null}
-
-        <FormField label="Base URL" hint="生图服务的 API 地址，例如：https://api.openai.com">
-          <input value={imgBaseUrl} onChange={(event) => { setImgBaseUrl(event.target.value); setImgTested(false); }} placeholder="https://..." />
-        </FormField>
-
-        <FormField label="API Key" hint="生图服务的 API Key。">
-          <input value={imgApiKey} onChange={(event) => { setImgApiKey(event.target.value); setImgTested(false); }} placeholder="sk-..." type="password" />
-        </FormField>
-
-        <div className="actions">
-          <button type="button" onClick={handleListImgModels} disabled={!canFetchImgModels || imgBusy !== null}>
-            {imgBusy === 'models' ? '获取中...' : '获取模型列表'}
-          </button>
-        </div>
-
-        <FormField label="生图模型">
-          <select value={imgSelectedModel} onChange={(event) => { setImgSelectedModel(event.target.value); setImgTested(false); }}>
-            {imgSelectedModel && !imgModels.some((model) => model.id === imgSelectedModel) ? <option value={imgSelectedModel}>{imgSelectedModel}</option> : null}
-            <option value="">请选择模型</option>
-            {imgModels.map((model) => (
-              <option key={model.id} value={model.id}>{model.id}</option>
-            ))}
-          </select>
-        </FormField>
-
-        <div className="grid two">
-          <FormField label="默认尺寸">
-            <select value={imgSize} onChange={(event) => setImgSize(event.target.value)}>
-              <option value="2048x1152">2048x1152 (16:9)</option>
-              <option value="1024x1024">1024x1024 (1:1)</option>
-              <option value="1792x1024">1792x1024</option>
-              <option value="1024x1792">1024x1792</option>
-            </select>
-          </FormField>
-          <FormField label="质量">
-            <select value={imgQuality} onChange={(event) => setImgQuality(event.target.value)}>
-              <option value="hd">hd</option>
-              <option value="standard">standard</option>
-            </select>
-          </FormField>
-        </div>
-
-        <div className="actions">
-          <button type="button" className="secondary" onClick={handleTestImageGeneration} disabled={!canTestImg || imgBusy !== null}>
-            {imgBusy === 'test' ? '测试中...' : '测试生图'}
-          </button>
-          <button type="button" onClick={handleSaveImageConfig} disabled={!canSaveImg || imgBusy !== null}>
-            {imgBusy === 'save' ? '保存中...' : '保存配置'}
-          </button>
-        </div>
-      </section>
-    </main>
+        </Form>
+      </Card>
+    </Space>
   );
 }

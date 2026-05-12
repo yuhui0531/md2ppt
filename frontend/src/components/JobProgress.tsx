@@ -1,5 +1,9 @@
+import React from 'react';
+import { Progress, Typography, Alert, Space, Card } from 'antd';
 import type { JobResponse } from '../types/api';
 import { jobStatusLabel } from '../utils/projectPresentation';
+
+const { Text } = Typography;
 
 interface JobProgressProps {
   job?: JobResponse | null;
@@ -8,18 +12,35 @@ interface JobProgressProps {
 export function JobProgress({ job }: JobProgressProps) {
   if (!job) return null;
   const progress = Math.round((job.progress ?? 0) * 100);
+  
+  const getStatus = () => {
+    if (job.status === 'completed') return 'success';
+    if (job.status === 'failed') return 'exception';
+    if (job.status === 'running') return 'active';
+    return 'normal';
+  };
+
   return (
-    <div className="job-progress">
-      <div className="progress-header">
-        <strong>{job.message || '正在生成'}</strong>
-        <span>{progress}%</span>
-      </div>
-      <div className="progress-track">
-        <div className={`progress-bar ${job.status === 'running' ? 'running' : ''}`} style={{ width: `${progress}%` }} />
-      </div>
-      <small>阶段：{stageLabel(job.stage)} · 状态：{jobStatusLabel(job.status)}</small>
-      {job.error ? <pre className="error-box">{job.error}</pre> : null}
-    </div>
+    <Card bordered={false} style={{ borderRadius: 12, background: '#f8fafc', marginBottom: 24, border: '1px solid #e2e8f0' }} bodyStyle={{ padding: 20 }}>
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text strong style={{ fontSize: 16 }}>{job.message || '正在生成'}</Text>
+          <Text type="secondary" style={{ fontSize: 13 }}>
+            阶段：{stageLabel(job.stage)} · 状态：{jobStatusLabel(job.status)}
+          </Text>
+        </div>
+        
+        <Progress 
+          percent={progress} 
+          status={getStatus()} 
+          strokeColor={job.status === 'running' ? '#1677ff' : undefined}
+        />
+        
+        {job.error && (
+          <Alert message={job.error} type="error" showIcon style={{ marginTop: 8 }} />
+        )}
+      </Space>
+    </Card>
   );
 }
 
