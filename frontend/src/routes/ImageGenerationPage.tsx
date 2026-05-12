@@ -198,18 +198,20 @@ export function ImageGenerationPage() {
                 
                 {!busy && slide.prompt ? (
                   retryingSlide === slide.slide_no ? (
-                    <Space.Compact style={{ width: '100%' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
                       <TextArea
-                        autoSize={{ minRows: 1, maxRows: 3 }}
+                        autoSize={{ minRows: 3, maxRows: 8 }}
                         placeholder="输入改进要求（可选）"
                         value={retryPrompt}
                         onChange={(e) => setRetryPrompt(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleRetrySlide(slide.slide_no); } }}
-                        style={{ fontSize: 13 }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleRetrySlide(slide.slide_no); } }}
+                        style={{ fontSize: 13, width: '100%', resize: 'vertical' }}
                       />
-                      <Button type="primary" onClick={() => handleRetrySlide(slide.slide_no)}>确认</Button>
-                      <Button onClick={() => { setRetryingSlide(null); setRetryPrompt(''); }}>取消</Button>
-                    </Space.Compact>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button onClick={() => { setRetryingSlide(null); setRetryPrompt(''); }}>取消</Button>
+                        <Button type="primary" onClick={() => handleRetrySlide(slide.slide_no)}>确认</Button>
+                      </div>
+                    </div>
                   ) : (
                     <Button 
                       type="default" 
