@@ -95,21 +95,21 @@ export function ProjectsPage() {
   }
 
   return (
-    <Space direction="vertical" size="large" style={{ display: 'flex', maxWidth: 1440, margin: '0 auto' }}>
-      <div style={{ marginBottom: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1440, margin: '0 auto' }}>
+      <div style={{ position: 'sticky', top: -24, zIndex: 10, background: '#f5f7fa', padding: '16px 0', marginTop: -16 }}>
         <Text type="secondary" style={{ letterSpacing: 1, fontSize: 12, fontWeight: 600, textTransform: 'uppercase' }}>Control Room</Text>
         <Title level={3} style={{ margin: '4px 0 8px' }}>项目管理</Title>
         <Text type="secondary" style={{ fontSize: 15 }}>从历史记录进入任意项目，继续生成、回看大纲、校验一致性，或者直接导出。</Text>
       </div>
 
       {!configured && (
-        <Alert 
-          message="当前还没有可用模型配置。你仍然可以查看历史项目，但新生成前需要先完成模型配置。" 
-          type="info" 
-          showIcon 
+        <Alert
+          message="当前还没有可用模型配置。你仍然可以查看历史项目，但新生成前需要先完成模型配置。"
+          type="info"
+          showIcon
         />
       )}
-      
+
       {message && (
         <Alert message={message.text} type={message.kind === 'error' ? 'error' : 'success'} showIcon />
       )}
@@ -172,8 +172,7 @@ export function ProjectsPage() {
                 >
                   <Button type="text" danger icon={<DeleteOutlined />} disabled={actionBusy !== null}>删除</Button>
                 </Popconfirm>,
-                <Button onClick={() => navigate(`/workspace/${project.project_id}`)}>工作台 <RightOutlined /></Button>,
-                <Button type="primary" ghost onClick={() => navigate(`/review/${project.project_id}`)}>审核导出 <ExportOutlined /></Button>
+                <Button onClick={() => navigate(`/workspace/${project.project_id}`)} type='primary'>进入工作台</Button>,
               ]}
             >
               <div style={{ width: '100%', maxWidth: '50%' }}>
@@ -196,7 +195,7 @@ export function ProjectsPage() {
           )}
         />
       </Card>
-    </Space>
+    </div>
   );
 }
 

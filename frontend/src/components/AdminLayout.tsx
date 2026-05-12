@@ -42,8 +42,8 @@ export function AdminLayout() {
   }));
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f5f7fa' }}>
-      <Sider width={280} theme="light" style={{ borderRight: '1px solid #f0f0f0' }}>
+    <Layout style={{ height: '100vh', overflow: 'hidden', background: '#f5f7fa' }}>
+      <Sider width={280} theme="light" style={{ borderRight: '1px solid #f0f0f0', height: '100vh', overflow: 'auto' }}>
         <div style={{ padding: '24px 20px 16px' }}>
           <Text type="secondary" style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>PROMPT CONSOLE</Text>
           <Title level={3} style={{ margin: '4px 0 8px' }}>MD2PPT管理台</Title>
@@ -59,8 +59,8 @@ export function AdminLayout() {
           style={{ borderRight: 0, padding: '0 12px' }}
         />
       </Sider>
-      <Layout style={{ background: '#f5f7fa' }}>
-        <Content style={{ padding: '24px 32px 32px', margin: 0, minHeight: 280, backgroundColor: '#f5f7fa', overflow: 'auto' }}>
+      <Layout style={{ background: '#f5f7fa', height: '100vh' }}>
+        <Content style={{ padding: '24px 32px 32px', margin: 0, backgroundColor: '#f5f7fa', overflow: 'auto' }}>
           <Outlet />
         </Content>
       </Layout>

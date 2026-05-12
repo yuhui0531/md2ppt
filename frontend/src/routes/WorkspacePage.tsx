@@ -89,8 +89,8 @@ export function WorkspacePage() {
   const hasSlideSummary = hasText(slide?.core_message) || slideModules.length > 0 || slideVisualElements.length > 0 || slideTextHierarchy.length > 0;
 
   return (
-    <Space direction="vertical" size="large" style={{ display: 'flex', maxWidth: 1600, margin: '0 auto', paddingBottom: 40 }}>
-      <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1600, margin: '0 auto', paddingBottom: 40 }}>
+      <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: -24, zIndex: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <Title level={3} style={{ margin: '0 0 8px' }}>项目工作台</Title>
@@ -103,10 +103,10 @@ export function WorkspacePage() {
               </Button>
             )}
             <Link to={`/workspace/${project.project_id}/images`}>
-              <Button icon={<PictureOutlined />}>批量生图</Button>
+              <Button type="primary" icon={<PictureOutlined />}>开始生图</Button>
             </Link>
             <Link to={`/review/${project.project_id}`}>
-              <Button type="primary" icon={<ExportOutlined />}>审核与导出</Button>
+              <Button icon={<ExportOutlined />}>导出提示词</Button>
             </Link>
           </Space>
         </div>
@@ -332,7 +332,7 @@ export function WorkspacePage() {
       >
         <StyleGuidePanel styleGuide={project.style_guide} />
       </Card>
-    </Space>
+    </div>
   );
 }
 

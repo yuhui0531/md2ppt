@@ -38,7 +38,7 @@ function TagList({ title, items, color }: { title: string; items: string[]; colo
       <Text type="secondary" strong style={{ display: 'block', marginBottom: 12 }}>{title}</Text>
       <Space wrap size={[0, 8]}>
         {items.map((item) => (
-          <Tag key={item} color={color} style={{ margin: '0 8px 0 0', padding: '2px 8px', fontSize: 13, borderRadius: 4 }}>
+          <Tag key={item} color={color} style={{ margin: '0 8px 0 0', padding: '2px 8px', fontSize: 13, borderRadius: 4, whiteSpace: 'normal', maxWidth: '100%', wordBreak: 'break-word' }}>
             {item}
           </Tag>
         ))}

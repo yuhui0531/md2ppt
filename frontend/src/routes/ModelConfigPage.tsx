@@ -177,8 +177,8 @@ export function ModelConfigPage() {
   }
 
   return (
-    <Space direction="vertical" size="large" style={{ display: 'flex', maxWidth: 1440, margin: '0 auto' }}>
-      <div style={{ marginBottom: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1440, margin: '0 auto' }}>
+      <div style={{ position: 'sticky', top: -24, zIndex: 10, background: '#f5f7fa', padding: '16px 0', marginTop: -16 }}>
         <Text type="secondary" style={{ letterSpacing: 1, fontSize: 12, fontWeight: 600, textTransform: 'uppercase' }}>Gateway Settings</Text>
         <Title level={3} style={{ margin: '4px 0 8px' }}>模型配置</Title>
         <Text type="secondary" style={{ fontSize: 15 }}>只需要配置一次。保存后会作为默认生成网关与模型，在后续项目里持续复用。</Text>
@@ -323,6 +323,6 @@ export function ModelConfigPage() {
       </Card>
         </Col>
       </Row>
-    </Space>
+    </div>
   );
 }

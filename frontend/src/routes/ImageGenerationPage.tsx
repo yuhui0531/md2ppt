@@ -124,8 +124,8 @@ export function ImageGenerationPage() {
     .map((s) => ({ src: s.image_url!, alt: `第${s.slide_no}页：${s.title}` }));
 
   return (
-    <Space direction="vertical" size="large" style={{ display: 'flex', maxWidth: 1440, margin: '0 auto' }}>
-      <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1440, margin: '0 auto' }}>
+      <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: -24, zIndex: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <Title level={3} style={{ margin: '0 0 8px' }}>批量生图</Title>
@@ -245,6 +245,6 @@ export function ImageGenerationPage() {
           </div>
         </Modal>
       )}
-    </Space>
+    </div>
   );
 }
