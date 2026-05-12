@@ -18,7 +18,7 @@ A local web application that turns Markdown raw materials into PPT-style slide d
 ## Architecture
 
 ```
-split_prompts/
+md2ppt/
 ├── backend/                 FastAPI + SQLModel (SQLite)
 │   └── app/
 │       ├── api/             HTTP routers (projects, generation, export, model_config)

@@ -18,7 +18,7 @@
 ## 项目结构
 
 ```
-split_prompts/
+md2ppt/
 ├── backend/                 FastAPI + SQLModel（SQLite）
 │   └── app/
 │       ├── api/             HTTP 路由（projects / generation / export / model_config）
