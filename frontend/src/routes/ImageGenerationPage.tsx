@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getProject } from '../api/projects';
 import { generateImages, exportPptx } from '../api/imageGeneration';
@@ -27,6 +27,15 @@ export function ImageGenerationPage() {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [retryPrompt, setRetryPrompt] = useState('');
   const [viewPromptSlide, setViewPromptSlide] = useState<number | null>(null);
+
+  // 路由 param 切换时同一 component 实例会复用，旧的 click handler 还在
+  // 跑 await 链路；它们必须能知道用户已经离开了原项目，否则会把旧项目的
+  // getProject 结果 setProject 写进全局 store。
+  const activeProjectIdRef = useRef(projectId);
+  useEffect(() => {
+    activeProjectIdRef.current = projectId;
+  }, [projectId]);
+  const stillScoped = (startedFor: string) => activeProjectIdRef.current === startedFor;
 
   useEffect(() => {
     if (!projectId) return;
@@ -102,78 +111,107 @@ export function ImageGenerationPage() {
 
   async function handleGenerateAll() {
     if (!project) return;
+    const startedFor = project.project_id;
     setBusy(true);
     const baselineUrls = new Map(project.slides.map((s) => [s.slide_no, s.image_url ?? null]));
     setGeneratingSlides(project.slides.map((s) => s.slide_no));
     setMessage(null);
     setJob(null);
     try {
-      const createdJob = await generateImages(project.project_id, { slide_numbers: null });
+      const createdJob = await generateImages(startedFor, { slide_numbers: null });
+      if (!stillScoped(startedFor)) return;
       setJob(createdJob);
-      const finalJob = await pollAndRefresh(createdJob.job_id, baselineUrls);
+      const finalJob = await pollAndRefresh(createdJob.job_id, baselineUrls, startedFor);
+      if (!stillScoped(startedFor)) return;
       if (finalJob.error) {
         setMessage({ kind: 'error', text: `批量生图存在失败：${finalJob.error}` });
       } else {
         setMessage({ kind: 'success', text: '批量生图完成' });
       }
     } catch (error) {
+      if (!stillScoped(startedFor)) return;
       setMessage({ kind: 'error', text: error instanceof Error ? error.message : '批量生图失败' });
     } finally {
-      setBusy(false);
-      setGeneratingSlides([]);
+      if (stillScoped(startedFor)) {
+        setBusy(false);
+        setGeneratingSlides([]);
+      }
     }
   }
 
   async function handleRetrySlide(slideNo: number) {
     if (!project) return;
+    const startedFor = project.project_id;
     setBusy(true);
     const baselineUrls = new Map(project.slides.map((s) => [s.slide_no, s.image_url ?? null]));
     setGeneratingSlides([slideNo]);
     setMessage(null);
     setJob(null);
     try {
-      const createdJob = await generateImages(project.project_id, {
+      const createdJob = await generateImages(startedFor, {
         slide_numbers: [slideNo],
         extra_prompt: retryPrompt.trim() || null,
       });
+      if (!stillScoped(startedFor)) return;
       setJob(createdJob);
-      const finalJob = await pollAndRefresh(createdJob.job_id, baselineUrls);
+      const finalJob = await pollAndRefresh(createdJob.job_id, baselineUrls, startedFor);
+      if (!stillScoped(startedFor)) return;
       if (finalJob.error) {
         setMessage({ kind: 'error', text: `第${slideNo}页重试失败：${finalJob.error}` });
       } else {
         setMessage({ kind: 'success', text: `第${slideNo}页重新生图完成` });
       }
     } catch (error) {
+      if (!stillScoped(startedFor)) return;
       setMessage({ kind: 'error', text: error instanceof Error ? error.message : '重试失败' });
     } finally {
-      setBusy(false);
-      setGeneratingSlides([]);
-      setRetryingSlide(null);
-      setRetryPrompt('');
+      if (stillScoped(startedFor)) {
+        setBusy(false);
+        setGeneratingSlides([]);
+        setRetryingSlide(null);
+        setRetryPrompt('');
+      }
     }
   }
 
   async function handleExportPptx() {
     if (!project) return;
+    const startedFor = project.project_id;
     setBusy(true);
     setMessage(null);
     try {
-      const result = await exportPptx(project.project_id);
+      const result = await exportPptx(startedFor);
+      if (!stillScoped(startedFor)) return;
       window.location.href = result.download_url;
     } catch (error) {
+      if (!stillScoped(startedFor)) return;
       setMessage({ kind: 'error', text: error instanceof Error ? error.message : 'PPT 导出失败' });
     } finally {
-      setBusy(false);
+      if (stillScoped(startedFor)) setBusy(false);
     }
   }
 
-  async function pollAndRefresh(jobId: string, baselineUrls: Map<number, string | null>): Promise<JobResponse> {
+  async function pollAndRefresh(jobId: string, baselineUrls: Map<number, string | null>, startedFor: string): Promise<JobResponse> {
     while (true) {
       await new Promise((resolve) => window.setTimeout(resolve, 2000));
       const latest = await getJob(jobId);
+      // 用户已经离开原项目页：不再 setState（避免把旧项目的 getProject 结果
+      // 写回全局 store），但仍按 latest 状态决定何时终止轮询。
+      if (!stillScoped(startedFor)) {
+        if (latest.status === 'completed') return latest;
+        if (latest.status === 'failed') throw new Error(latest.error || '生图失败');
+        if (latest.status === 'cancelled') throw new Error('任务已取消');
+        continue;
+      }
       setJob(latest);
       if (project) {
         const updated = await getProject(project.project_id);
+        if (!stillScoped(startedFor)) {
+          if (latest.status === 'completed') return latest;
+          if (latest.status === 'failed') throw new Error(latest.error || '生图失败');
+          if (latest.status === 'cancelled') throw new Error('任务已取消');
+          continue;
+        }
         setProject(updated);
         setGeneratingSlides((prev) => prev.filter((slideNo) => {
           const updatedSlide = updated.slides.find((s) => s.slide_no === slideNo);

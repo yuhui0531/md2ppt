@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getProject } from '../api/projects';
 import { checkConsistency, generateProject, getActiveJob, regeneratePrompts, reviseInconsistentPrompts } from '../api/generation';
@@ -32,6 +32,16 @@ export function WorkspacePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [job, setJob] = useState<JobResponse | null>(null);
   const [message, setMessage] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(null);
+
+  // 路由 param 切换时同一 component 实例会复用，旧的 click handler 还在
+  // 跑 await 链路；它们必须能知道用户已经离开了原项目，否则会把旧项目的
+  // getProject 结果 setProject 写进全局 store。每次 setState 后 await 前
+  // 都用这个 ref 复查一次"我们还在原项目页吗"。
+  const activeProjectIdRef = useRef(projectId);
+  useEffect(() => {
+    activeProjectIdRef.current = projectId;
+  }, [projectId]);
+  const stillScoped = (startedFor: string) => activeProjectIdRef.current === startedFor;
 
   useEffect(() => {
     if (!projectId) return;
@@ -67,6 +77,7 @@ export function WorkspacePage() {
         });
         if (cancelled) return;
         const updated = await getProject(projectId);
+        if (cancelled) return;
         setProject(updated);
         if (active.kind === 'generation' && !finalJob.error) {
           setMessage({ kind: 'success', text: '已自动接续完成进行中的任务' });
@@ -89,16 +100,20 @@ export function WorkspacePage() {
   const displayJob = job?.kind === 'generation' ? job : null;
 
   async function refreshWith(action: () => Promise<ProjectData>, success: string) {
+    if (!project) return;
+    const startedFor = project.project_id;
     setBusy(success);
     setMessage(null);
     try {
       const updated = await action();
+      if (!stillScoped(startedFor)) return;
       setProject(updated);
       setMessage({ kind: 'success', text: success });
     } catch (error) {
+      if (!stillScoped(startedFor)) return;
       setMessage({ kind: 'error', text: error instanceof Error ? error.message : '操作失败' });
     } finally {
-      setBusy(null);
+      if (stillScoped(startedFor)) setBusy(null);
     }
   }
 
@@ -107,20 +122,27 @@ export function WorkspacePage() {
     // 已经有任务在跑（可能是首屏 useEffect 接续的，也可能是刚点过一次还没轮询完），
     // 不要再发 POST 触发 409；按钮 disabled/loading 已经覆盖这条路径，这里是双保险。
     if (jobRunning) return;
+    const startedFor = project.project_id;
     setBusy('继续生成');
     setMessage(null);
     setJob(null);
     try {
-      const createdJob = await generateProject(project.project_id, 'auto');
+      const createdJob = await generateProject(startedFor, 'auto');
+      if (!stillScoped(startedFor)) return;
       setJob(createdJob);
-      await pollJobUntilFinished(createdJob.job_id, (latest) => setJob(latest));
-      const updated = await getProject(project.project_id);
+      await pollJobUntilFinished(createdJob.job_id, (latest) => {
+        if (stillScoped(startedFor)) setJob(latest);
+      });
+      if (!stillScoped(startedFor)) return;
+      const updated = await getProject(startedFor);
+      if (!stillScoped(startedFor)) return;
       setProject(updated);
       setMessage({ kind: 'success', text: '已继续完成生成' });
     } catch (error) {
+      if (!stillScoped(startedFor)) return;
       setMessage({ kind: 'error', text: error instanceof Error ? error.message : '继续生成失败' });
     } finally {
-      setBusy(null);
+      if (stillScoped(startedFor)) setBusy(null);
     }
   }
 
