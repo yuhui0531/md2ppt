@@ -12,7 +12,15 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  const response = await fetch(path, { ...init, headers });
+  const response = await fetch(path, {
+    credentials: 'same-origin',
+    ...init,
+    headers,
+  });
+  if (response.status === 401) {
+    window.location.replace('/sso/failed?reason=unauthorized');
+    throw new ApiError('未登录或登录已过期', 401);
+  }
   if (!response.ok) {
     throw new ApiError(await errorMessage(response), response.status);
   }

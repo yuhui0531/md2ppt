@@ -8,6 +8,7 @@ from app.models.time import utc_now
 
 class ProjectRecord(SQLModel, table=True):
     id: str = Field(primary_key=True)
+    user_id: int = Field(index=True, default=-1)
     title: str
     source_filename: str | None = None
     source_language: str = "zh-CN"

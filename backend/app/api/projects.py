@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
+from app.core.auth import get_current_user_id
 from app.models.db import get_session
 from app.models.schemas import (
     CreateProjectRequest,
@@ -16,8 +17,11 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
 @router.get("", response_model=ProjectListResponse)
-def list_projects(session: Session = Depends(get_session)) -> ProjectListResponse:
-    projects = ProjectService(session).list_projects()
+def list_projects(
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> ProjectListResponse:
+    projects = ProjectService(session).list_projects(user_id=user_id)
     return ProjectListResponse(projects=projects)
 
 
@@ -25,14 +29,19 @@ def list_projects(session: Session = Depends(get_session)) -> ProjectListRespons
 def create_project(
     request: CreateProjectRequest,
     session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
 ) -> CreateProjectResponse:
-    project = ProjectService(session).create_project(request)
+    project = ProjectService(session).create_project(request, user_id=user_id)
     return CreateProjectResponse(project_id=project.project_id, generation_state=project.generation_state)
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-def get_project(project_id: str, session: Session = Depends(get_session)) -> ProjectResponse:
-    project = ProjectService(session).get_project_data(project_id)
+def get_project(
+    project_id: str,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> ProjectResponse:
+    project = ProjectService(session).get_project_data(project_id, user_id=user_id)
     return ProjectResponse(project=project)
 
 
@@ -41,11 +50,16 @@ def rename_project(
     project_id: str,
     request: RenameProjectRequest,
     session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
 ) -> RenameProjectResponse:
-    record = ProjectService(session).rename_project(project_id, request.title)
+    record = ProjectService(session).rename_project(project_id, request.title, user_id=user_id)
     return RenameProjectResponse(project_id=record.id, title=record.title)
 
 
 @router.delete("/{project_id}", status_code=204)
-def delete_project(project_id: str, session: Session = Depends(get_session)) -> None:
-    ProjectService(session).delete_project(project_id)
+def delete_project(
+    project_id: str,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> None:
+    ProjectService(session).delete_project(project_id, user_id=user_id)

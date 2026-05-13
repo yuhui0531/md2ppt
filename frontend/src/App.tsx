@@ -3,6 +3,7 @@ import { AdminLayout } from './components/AdminLayout';
 import { ModelConfigPage } from './routes/ModelConfigPage';
 import { ProjectsPage } from './routes/ProjectsPage';
 import { ReviewExportPage } from './routes/ReviewExportPage';
+import { SsoFailedPage } from './routes/SsoFailedPage';
 import { UploadPage } from './routes/UploadPage';
 import { ImageGenerationPage } from './routes/ImageGenerationPage';
 import { WorkspacePage } from './routes/WorkspacePage';
@@ -10,6 +11,7 @@ import { WorkspacePage } from './routes/WorkspacePage';
 export default function App() {
   return (
     <Routes>
+      <Route path="/sso/failed" element={<SsoFailedPage />} />
       <Route path="/" element={<AdminLayout />}>
         <Route index element={<Navigate to="/projects" replace />} />
         <Route path="projects" element={<ProjectsPage />} />

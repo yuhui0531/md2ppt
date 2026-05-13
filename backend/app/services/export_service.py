@@ -6,36 +6,40 @@ from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
+from fastapi import HTTPException
 from sqlmodel import Session
 
 from app.config import settings
+from app.models.project import ProjectRecord
 from app.models.schemas import ExportResponse, ProjectData
 from app.services.project_service import ProjectService
 
 
 class ExportService:
     def __init__(self, session: Session) -> None:
+        self.session = session
         self.project_service = ProjectService(session)
         self.export_dir = settings.storage_dir / "exports"
 
     def export_project(self, project_id: str, export_format: str, include_index: bool = True) -> ExportResponse:
-        data = self.project_service.get_project_data(project_id)
+        data = self.project_service.get_project_data_internal(project_id)
         self.export_dir.mkdir(parents=True, exist_ok=True)
-        export_id = f"export_{uuid4().hex[:12]}"
+        export_id = uuid4().hex[:12]
+        stem = f"{project_id}__{export_id}"
 
         if export_format == "json":
             filename = f"{self._safe_filename(self._project_title(data))}-ppt-prompts.json"
-            path = self.export_dir / f"{export_id}.json"
+            path = self.export_dir / f"{stem}.json"
             path.write_text(self._json_content(data), encoding="utf-8")
             content_type = "application/json"
         elif export_format == "markdown":
             filename = f"{self._safe_filename(self._project_title(data))}-ppt-prompts.md"
-            path = self.export_dir / f"{export_id}.md"
+            path = self.export_dir / f"{stem}.md"
             path.write_text(self._markdown_content(data), encoding="utf-8")
             content_type = "text/markdown"
         elif export_format == "prompt_zip":
             filename = f"{self._safe_filename(self._project_title(data))}-slide-prompts.zip"
-            path = self.export_dir / f"{export_id}.zip"
+            path = self.export_dir / f"{stem}.zip"
             path.write_bytes(self._prompt_zip_content(data, include_index))
             content_type = "application/zip"
         else:
@@ -47,11 +51,28 @@ class ExportService:
             download_url=f"/api/exports/{path.name}/download?filename={filename}",
         )
 
-    def resolve_export_path(self, export_file: str) -> Path:
+    def resolve_export_path(self, export_file: str, user_id: int) -> Path:
         path = (self.export_dir / export_file).resolve()
         if not path.is_relative_to(self.export_dir.resolve()) or not path.exists() or not path.is_file():
             raise FileNotFoundError
+        project_id = self._extract_project_id(path.name)
+        if project_id is None:
+            raise FileNotFoundError
+        record = self.session.get(ProjectRecord, project_id)
+        if not record or record.user_id != user_id:
+            raise FileNotFoundError
         return path
+
+    @staticmethod
+    def _extract_project_id(filename: str) -> str | None:
+        # 期望格式：{project_id}__{export_id}.{ext}
+        stem = filename.rsplit(".", 1)[0]
+        if "__" not in stem:
+            return None
+        project_id, _, _ = stem.partition("__")
+        if not project_id.startswith("proj_"):
+            return None
+        return project_id
 
     def _json_content(self, data: ProjectData) -> str:
         return json.dumps(data.model_dump(mode="json"), ensure_ascii=False, indent=2)

@@ -3,6 +3,7 @@ from typing import Any, Callable
 import json
 
 import httpx
+from loguru import logger
 
 from app.config import settings
 from app.core.security import validate_gateway_base_url
@@ -22,7 +23,7 @@ def _log_response(tag: str, response: httpx.Response, **extra: Any) -> None:
         f"bytes={len(response.content)}",
     ]
     parts.extend(f"{k}={v}" for k, v in extra.items())
-    print(" ".join(parts), flush=True)
+    logger.info(" ".join(parts))
 
 
 class GatewayError(Exception):
@@ -82,7 +83,7 @@ class GatewayClient:
             try:
                 response = await client.post(url, headers=self._headers(), json=payload)
             except httpx.HTTPError as exc:
-                print(f"[gateway] chat_completion FAILED model={model} error={exc.__class__.__name__}: {exc}", flush=True)
+                logger.error("[gateway] chat_completion FAILED model={} error={}: {}", model, exc.__class__.__name__, exc)
                 raise GatewayError(f"生成请求失败：{exc.__class__.__name__}") from exc
         _log_response("chat_completion", response, model=model, max_tokens=max_tokens)
         if response.is_redirect:
@@ -164,21 +165,19 @@ class GatewayClient:
                             try:
                                 on_partial(buffer)
                             except Exception as cb_exc:
-                                print(f"[gateway] chat_completion_stream on_partial raised {cb_exc.__class__.__name__}: {cb_exc}", flush=True)
+                                logger.error("[gateway] chat_completion_stream on_partial raised {}: {}", cb_exc.__class__.__name__, cb_exc)
                                 raise
                         if len(buffer) > settings.max_gateway_response_bytes:
                             raise GatewayError("流式生成响应过大")
                     elapsed = response.elapsed.total_seconds() if response.elapsed else 0.0
-                    print(
-                        f"[gateway] chat_completion_stream model={model} max_tokens={max_tokens} "
-                        f"chunks={chunk_count} bytes={len(buffer)} elapsed={elapsed:.2f}s",
-                        flush=True,
+                    logger.info(
+                        "[gateway] chat_completion_stream model={} max_tokens={} chunks={} bytes={} elapsed={:.2f}s",
+                        model, max_tokens, chunk_count, len(buffer), elapsed,
                     )
             except httpx.HTTPError as exc:
-                print(
-                    f"[gateway] chat_completion_stream FAILED model={model} chunks={chunk_count} "
-                    f"bytes={len(buffer)} error={exc.__class__.__name__}: {exc}",
-                    flush=True,
+                logger.error(
+                    "[gateway] chat_completion_stream FAILED model={} chunks={} bytes={} error={}: {}",
+                    model, chunk_count, len(buffer), exc.__class__.__name__, exc,
                 )
                 raise GatewayError(f"流式生成请求失败：{exc.__class__.__name__}") from exc
         if not buffer:
@@ -202,7 +201,7 @@ class GatewayClient:
             try:
                 response = await client.post(url, headers=self._headers(), json=payload)
             except httpx.HTTPError as exc:
-                print(f"[gateway] image_generation FAILED model={model} error={exc.__class__.__name__}: {exc}", flush=True)
+                logger.error("[gateway] image_generation FAILED model={} error={}: {}", model, exc.__class__.__name__, exc)
                 raise GatewayError(f"生图请求失败：{exc.__class__.__name__}") from exc
         _log_response("image_generation", response, model=model)
         if response.is_redirect:

@@ -17,7 +17,9 @@ class ProjectService:
         self.session = session
         self.parser = MarkdownParserService()
 
-    def create_project(self, request: CreateProjectRequest) -> ProjectData:
+    def create_project(self, request: CreateProjectRequest, user_id: int) -> ProjectData:
+        if user_id <= 0:
+            raise HTTPException(status_code=401, detail="未登录或登录已过期")
         project_id = f"proj_{uuid4().hex[:12]}"
         sections = self.parser.parse(request.source.content)
         title = self._resolve_title(
@@ -49,6 +51,7 @@ class ProjectService:
         )
         record = ProjectRecord(
             id=project_id,
+            user_id=user_id,
             title=title,
             source_filename=request.source.filename,
             source_language=request.source.language,
@@ -61,16 +64,21 @@ class ProjectService:
         self.session.commit()
         return data
 
-    def get_project_data(self, project_id: str) -> ProjectData:
-        record = self.session.get(ProjectRecord, project_id)
-        if not record:
-            raise HTTPException(status_code=404, detail="项目不存在")
+    def get_project_data(self, project_id: str, user_id: int) -> ProjectData:
+        record = self._get_owned_record(project_id, user_id)
         data = ProjectData.model_validate(json.loads(record.data_json))
         self._ensure_record_title(record, data)
         return data
 
-    def list_projects(self) -> list[ProjectSummary]:
-        records = list(self.session.exec(select(ProjectRecord).order_by(ProjectRecord.updated_at.desc())))
+    def list_projects(self, user_id: int) -> list[ProjectSummary]:
+        if user_id <= 0:
+            return []
+        stmt = (
+            select(ProjectRecord)
+            .where(ProjectRecord.user_id == user_id)
+            .order_by(ProjectRecord.updated_at.desc())
+        )
+        records = list(self.session.exec(stmt))
         summaries: list[ProjectSummary] = []
         for record in records:
             try:
@@ -96,6 +104,7 @@ class ProjectService:
         return summaries
 
     def save_project_data(self, data: ProjectData) -> None:
+        """内部更新接口：调用方必须已经通过 _get_owned_record 等手段确认归属。"""
         record = self.session.get(ProjectRecord, data.project_id)
         if not record:
             raise HTTPException(status_code=404, detail="项目不存在")
@@ -106,10 +115,17 @@ class ProjectService:
         self.session.add(record)
         self.session.commit()
 
-    def rename_project(self, project_id: str, title: str) -> ProjectRecord:
+    def get_project_data_internal(self, project_id: str) -> ProjectData:
+        """后台任务等已通过入口归属校验的内部场景使用，不再二次校验。"""
         record = self.session.get(ProjectRecord, project_id)
         if not record:
             raise HTTPException(status_code=404, detail="项目不存在")
+        data = ProjectData.model_validate(json.loads(record.data_json))
+        self._ensure_record_title(record, data)
+        return data
+
+    def rename_project(self, project_id: str, title: str, user_id: int) -> ProjectRecord:
+        record = self._get_owned_record(project_id, user_id)
         normalized = title.strip()
         if not normalized:
             raise HTTPException(status_code=400, detail="项目名称不能为空")
@@ -120,14 +136,20 @@ class ProjectService:
         self.session.refresh(record)
         return record
 
-    def delete_project(self, project_id: str) -> None:
-        record = self.session.get(ProjectRecord, project_id)
-        if not record:
-            raise HTTPException(status_code=404, detail="项目不存在")
+    def delete_project(self, project_id: str, user_id: int) -> None:
+        record = self._get_owned_record(project_id, user_id)
         self.session.exec(delete(ParsedSectionRecord).where(ParsedSectionRecord.project_id == project_id))
         self.session.exec(delete(JobRecord).where(JobRecord.project_id == project_id))
         self.session.delete(record)
         self.session.commit()
+
+    def _get_owned_record(self, project_id: str, user_id: int) -> ProjectRecord:
+        if user_id <= 0:
+            raise HTTPException(status_code=401, detail="未登录或登录已过期")
+        record = self.session.get(ProjectRecord, project_id)
+        if not record or record.user_id != user_id:
+            raise HTTPException(status_code=404, detail="项目不存在")
+        return record
 
     def _replace_sections(self, project_id: str, sections: list[ParsedSection]) -> None:
         self.session.exec(delete(ParsedSectionRecord).where(ParsedSectionRecord.project_id == project_id))

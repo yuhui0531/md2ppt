@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
+from app.core.auth import get_current_user_id
 from app.core.gateway_client import GatewayClient, GatewayError
 from app.core.json_repair import loads_json_with_repair
 from app.core.security import validate_gateway_base_url
@@ -27,7 +28,11 @@ router = APIRouter(prefix="/api/model-config", tags=["model-config"])
 
 
 @router.get("")
-def get_model_config(kind: str = "text", session: Session = Depends(get_session)):
+def get_model_config(
+    kind: str = "text",
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+):
     statement = select(ModelConfigRecord).where(ModelConfigRecord.kind == kind)
     record = session.exec(statement).first()
     if kind == "image":
@@ -53,7 +58,10 @@ def get_model_config(kind: str = "text", session: Session = Depends(get_session)
 
 
 @router.post("/models", response_model=ModelListResponse)
-async def list_models(request: ModelListRequest) -> ModelListResponse:
+async def list_models(
+    request: ModelListRequest,
+    user_id: int = Depends(get_current_user_id),
+) -> ModelListResponse:
     try:
         client = GatewayClient(request.base_url, request.api_key)
         models = await client.list_models(request.models_endpoint)
@@ -65,7 +73,10 @@ async def list_models(request: ModelListRequest) -> ModelListResponse:
 
 
 @router.post("/generation-test", response_model=GenerationTestResponse)
-async def generation_test(request: GenerationTestRequest) -> GenerationTestResponse:
+async def generation_test(
+    request: GenerationTestRequest,
+    user_id: int = Depends(get_current_user_id),
+) -> GenerationTestResponse:
     if request.generation_endpoint_type != "chat_completions":
         raise HTTPException(status_code=400, detail="MVP 只支持 chat_completions 生成端点")
     try:
@@ -87,7 +98,10 @@ async def generation_test(request: GenerationTestRequest) -> GenerationTestRespo
 
 
 @router.post("/image-generation-test", response_model=ImageGenerationTestResponse)
-async def image_generation_test(request: ImageGenerationTestRequest) -> ImageGenerationTestResponse:
+async def image_generation_test(
+    request: ImageGenerationTestRequest,
+    user_id: int = Depends(get_current_user_id),
+) -> ImageGenerationTestResponse:
     try:
         client = GatewayClient(request.base_url, request.api_key)
         await client.image_generation(
@@ -105,6 +119,7 @@ async def image_generation_test(request: ImageGenerationTestRequest) -> ImageGen
 def save_model_config(
     request: SaveModelConfigRequest,
     session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
 ) -> SaveModelConfigResponse:
     try:
         base_url = validate_gateway_base_url(request.base_url)
@@ -146,6 +161,7 @@ def save_model_config(
 def save_image_model_config(
     request: SaveImageModelConfigRequest,
     session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
 ) -> SaveModelConfigResponse:
     try:
         base_url = validate_gateway_base_url(request.base_url)

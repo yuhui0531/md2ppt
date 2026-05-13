@@ -23,6 +23,33 @@ def _needs_migration() -> bool:
         conn.close()
 
 
+def _needs_user_id_migration() -> bool:
+    db_path = settings.storage_dir / "app.db"
+    if not db_path.exists():
+        return False
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cursor = conn.execute("PRAGMA table_info(projectrecord)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if not columns:
+            return False
+        return "user_id" not in columns
+    finally:
+        conn.close()
+
+
+def _apply_user_id_migration() -> None:
+    db_path = settings.storage_dir / "app.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        # 历史孤儿哨兵 -1：service 层显式拒绝 user_id <= 0
+        conn.execute("ALTER TABLE projectrecord ADD COLUMN user_id INTEGER NOT NULL DEFAULT -1")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_projectrecord_user_id ON projectrecord(user_id)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     (settings.storage_dir / "uploads").mkdir(parents=True, exist_ok=True)
@@ -36,6 +63,9 @@ def init_db() -> None:
             conn.commit()
         finally:
             conn.close()
+
+    if _needs_user_id_migration():
+        _apply_user_id_migration()
 
     SQLModel.metadata.create_all(engine)
 

@@ -1,5 +1,5 @@
 [project]
-name = "markdown-ppt-prompt-app"
+name = "md2ppt"
 version = "0.1.0"
 description = "Local web app for generating PPT-style image prompts from Markdown raw materials."
 requires-python = ">=3.11"
@@ -12,6 +12,8 @@ dependencies = [
     "markdown-it-py>=3.0.0",
     "sqlmodel>=0.0.22",
     "python-pptx>=1.0.0",
+    "pyjwt>=2.8.0",
+    "loguru>=0.7.2",
 ]
 
 [[tool.uv.index]]

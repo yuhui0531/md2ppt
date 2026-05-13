@@ -1,6 +1,7 @@
 import asyncio
 
 from fastapi import HTTPException
+from loguru import logger
 from sqlmodel import Session, select
 
 from app.core.gateway_client import GatewayClient, GatewayError
@@ -34,7 +35,7 @@ class ImageGenerationService:
         extra_prompt: str | None = None,
     ) -> None:
         config = self.get_image_config()
-        data = self.project_service.get_project_data(project_id)
+        data = self.project_service.get_project_data_internal(project_id)
 
         if not data.slides:
             job_service.update(job, stage="completed", progress=1.0, message="没有可生成的页面", status="completed")
@@ -65,7 +66,7 @@ class ImageGenerationService:
                     data.slides[slide_index].image_url = image_url
                 except (ValueError, GatewayError) as exc:
                     failed_pages.append(slide_no)
-                    print(f"[image-gen] slide {slide_no} failed: {exc}", flush=True)
+                    logger.warning("[image-gen] slide {} failed: {}", slide_no, exc)
 
                 completed += 1
                 self.project_service.save_project_data(data)

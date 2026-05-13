@@ -7,19 +7,28 @@ from urllib.parse import unquote
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from loguru import logger
 from pptx import Presentation
 from pptx.util import Emu, Inches
 from sqlmodel import Session
 
+from app.core.auth import get_current_user_id
 from app.models.db import get_session
 from app.models.schemas import ExportRequest, ExportResponse
 from app.services.export_service import ExportService
+from app.services.project_service import ProjectService
 
 router = APIRouter(tags=["export"])
 
 
 @router.post("/api/projects/{project_id}/export", response_model=ExportResponse)
-def export_project(project_id: str, request: ExportRequest, session: Session = Depends(get_session)) -> ExportResponse:
+def export_project(
+    project_id: str,
+    request: ExportRequest,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> ExportResponse:
+    ProjectService(session)._get_owned_record(project_id, user_id)
     try:
         return ExportService(session).export_project(project_id, request.format, request.include_index)
     except ValueError as exc:
@@ -31,9 +40,10 @@ def download_export(
     export_file: str,
     filename: str = Query(...),
     session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
 ) -> FileResponse:
     try:
-        path = ExportService(session).resolve_export_path(export_file)
+        path = ExportService(session).resolve_export_path(export_file, user_id=user_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="导出文件不存在") from exc
     return FileResponse(
@@ -57,12 +67,12 @@ def _media_type(path: Path) -> str:
 async def export_pptx(
     project_id: str,
     session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
 ) -> ExportResponse:
-    from app.services.project_service import ProjectService
     from app.config import settings
 
     project_service = ProjectService(session)
-    data = project_service.get_project_data(project_id)
+    data = project_service.get_project_data(project_id, user_id=user_id)
 
     slides_with_images = [s for s in data.slides if s.image_url]
     if not slides_with_images:
@@ -79,7 +89,6 @@ async def export_pptx(
             try:
                 image_url = slide.image_url
                 if image_url.startswith("data:"):
-                    # data URI: data:image/png;base64,xxxxx
                     header, b64data = image_url.split(",", 1)
                     image_bytes = base64.b64decode(b64data)
                 else:
@@ -90,7 +99,7 @@ async def export_pptx(
                 pptx_slide = prs.slides.add_slide(blank_layout)
                 pptx_slide.shapes.add_picture(image_stream, Emu(0), Emu(0), prs.slide_width, prs.slide_height)
             except Exception as exc:
-                print(f"[export-pptx] slide {slide.slide_no} image failed: {exc}", flush=True)
+                logger.warning("[export-pptx] slide {} image failed: {}", slide.slide_no, exc)
                 failed_slides.append(slide.slide_no)
                 continue
 
@@ -100,8 +109,8 @@ async def export_pptx(
 
     export_dir = settings.storage_dir / "exports"
     export_dir.mkdir(parents=True, exist_ok=True)
-    export_id = f"export_{__import__('uuid').uuid4().hex[:12]}"
-    path = export_dir / f"{export_id}.pptx"
+    export_id = __import__('uuid').uuid4().hex[:12]
+    path = export_dir / f"{project_id}__{export_id}.pptx"
 
     pptx_bytes = BytesIO()
     prs.save(pptx_bytes)

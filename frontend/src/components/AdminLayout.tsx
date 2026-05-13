@@ -16,6 +16,14 @@ export function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  React.useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('ssoToken')) {
+      url.searchParams.delete('ssoToken');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, []);
+
   function getActiveKey() {
     if (location.pathname.startsWith('/projects/new')) return '/projects/new';
     if (location.pathname.startsWith('/settings/model')) return '/settings/model';

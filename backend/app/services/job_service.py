@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import HTTPException
+from loguru import logger
 from sqlmodel import Session, select
 
 from app.models.job import JobRecord
@@ -50,9 +51,9 @@ class JobService:
             job.status = status
         job.error = error
         job.updated_at = datetime.now(timezone.utc)
-        print(
-            f"[job] id={job.id} project={job.project_id} status={job.status} stage={stage} progress={progress:.2f} message={message} error={error or ''}",
-            flush=True,
+        logger.info(
+            "[job] id={} project={} status={} stage={} progress={:.2f} message={} error={}",
+            job.id, job.project_id, job.status, stage, progress, message, error or "",
         )
         self.session.add(job)
         self.session.commit()

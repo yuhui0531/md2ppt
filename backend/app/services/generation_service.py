@@ -3,6 +3,7 @@ import time
 from typing import Any, Callable
 
 from fastapi import HTTPException
+from loguru import logger
 from pydantic import ValidationError
 from sqlmodel import Session, select
 
@@ -89,7 +90,7 @@ class GenerationService:
         self.template_service = TemplateService()
 
     async def run_generation(self, project_id: str, mode: str = "auto", job_service: JobService | None = None, job: JobRecord | None = None) -> ProjectData:
-        data = self.project_service.get_project_data(project_id)
+        data = self.project_service.get_project_data_internal(project_id)
         if mode == "restart":
             data = self._reset_generation(data)
             self.project_service.save_project_data(data)
@@ -162,7 +163,7 @@ class GenerationService:
         return await self.run_generation(project_id, mode="restart", job_service=job_service, job=job)
 
     async def regenerate_outline(self, project_id: str, options: GenerationOptions) -> ProjectData:
-        data = self.project_service.get_project_data(project_id)
+        data = self.project_service.get_project_data_internal(project_id)
         data.generation_options.slide_count_mode = options.slide_count_mode
         data.generation_options.requested_slide_count = options.requested_slide_count
         data.generation_options.requested_slide_range = options.requested_slide_range
@@ -177,7 +178,7 @@ class GenerationService:
         return data
 
     async def regenerate_prompts(self, project_id: str, slide_numbers: list[int] | None = None) -> ProjectData:
-        data = self.project_service.get_project_data(project_id)
+        data = self.project_service.get_project_data_internal(project_id)
         if data.style_guide is None:
             data.style_guide = await self.generate_style_guide(data)
         generated = await self.generate_slide_prompts(data, slide_numbers)
@@ -192,14 +193,14 @@ class GenerationService:
         return data
 
     async def check_consistency_for_project(self, project_id: str, threshold: float) -> ProjectData:
-        data = self.project_service.get_project_data(project_id)
+        data = self.project_service.get_project_data_internal(project_id)
         data.consistency_report = await self.check_consistency(data, threshold)
         data.generation_state = "consistency_checked"
         self.project_service.save_project_data(data)
         return data
 
     async def revise_inconsistent_prompts(self, project_id: str, threshold: float) -> ProjectData:
-        data = self.project_service.get_project_data(project_id)
+        data = self.project_service.get_project_data_internal(project_id)
         if data.consistency_report is None:
             data.consistency_report = await self.check_consistency(data, threshold)
         inconsistent_numbers = {
@@ -509,10 +510,9 @@ class GenerationService:
         client = GatewayClient(config.base_url, config.api_key_encrypted)
         request_body = json.dumps(payload, ensure_ascii=False)
         started = time.monotonic()
-        print(
-            f"[generation] stage={stage} model={config.selected_model} input_chars={len(request_body)} "
-            f"max_tokens={config.max_tokens} stream={on_partial is not None}",
-            flush=True,
+        logger.info(
+            "[generation] stage={} model={} input_chars={} max_tokens={} stream={}",
+            stage, config.selected_model, len(request_body), config.max_tokens, on_partial is not None,
         )
         try:
             messages = [
@@ -534,15 +534,15 @@ class GenerationService:
                     temperature=config.temperature,
                     max_tokens=config.max_tokens,
                 )
-            print(
-                f"[generation] stage={stage} model={config.selected_model} elapsed={time.monotonic() - started:.1f}s output_chars={len(content)}",
-                flush=True,
+            logger.info(
+                "[generation] stage={} model={} elapsed={:.1f}s output_chars={}",
+                stage, config.selected_model, time.monotonic() - started, len(content),
             )
             return loads_json_with_repair(content)
         except GatewayError as exc:
-            print(
-                f"[generation] stage={stage} model={config.selected_model} elapsed={time.monotonic() - started:.1f}s error={exc}",
-                flush=True,
+            logger.error(
+                "[generation] stage={} model={} elapsed={:.1f}s error={}",
+                stage, config.selected_model, time.monotonic() - started, exc,
             )
             raise HTTPException(status_code=502, detail=f"{stage}模型调用失败（{config.selected_model}）：{exc}, payload={payload}") from exc
         except ValueError as exc:
