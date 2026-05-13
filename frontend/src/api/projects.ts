@@ -30,6 +30,12 @@ export async function renameProject(projectId: string, title: string): Promise<{
   });
 }
 
+export async function suggestProjectTitle(projectId: string): Promise<{ title: string }> {
+  return api(`/api/projects/${projectId}/suggest-title`, {
+    method: 'POST',
+  });
+}
+
 export async function deleteProject(projectId: string): Promise<void> {
   await api(`/api/projects/${projectId}`, {
     method: 'DELETE',

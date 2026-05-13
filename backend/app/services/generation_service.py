@@ -18,6 +18,7 @@ from app.core.prompts.slide_prompts import SLIDE_PROMPTS_PROMPT
 from app.core.prompts.style_guide import STYLE_GUIDE_PROMPT
 from app.models.model_config import ModelConfigRecord
 from app.models.job import JobRecord
+from app.models.project import ProjectRecord
 from app.models.schemas import (
     ConsistencyReport,
     DeckBrief,
@@ -548,6 +549,40 @@ class GenerationService:
             raise HTTPException(status_code=502, detail=f"{stage}模型调用失败（{config.selected_model}）：{exc}, payload={payload}") from exc
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=f"{stage}模型返回非 JSON（{config.selected_model}）：{exc}, payload={payload}") from exc
+
+    async def suggest_title(self, project_id: str) -> str:
+        """让用户配置的文本模型为项目起一个简洁项目名。
+        调用方需保证项目归属已校验（本方法不查 user_id 关系）。"""
+        record = self.session.get(ProjectRecord, project_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="项目不存在")
+        # source_content 是用户原始上传的 markdown，对取标题最有信号量；
+        # 截到 3000 字符避免长素材吃 token，对项目命名这种短输出足够。
+        text = (record.source_content or "").strip()[:3000]
+        if not text:
+            raise HTTPException(status_code=400, detail="项目素材为空，无法生成标题")
+        config = self._require_model_config()
+        client = GatewayClient(config.base_url, config.api_key_encrypted)
+        try:
+            content = await client.chat_completion_json(
+                config.selected_model,
+                [
+                    {"role": "system", "content": "你只输出 JSON。"},
+                    {"role": "user", "content": (
+                        "请为下面的素材取一个简洁扼要的中文项目名（不超过 20 个汉字，"
+                        "不要书名号、引号、句号等标点；避免空泛词如\"报告/方案\"结尾）。"
+                        f"只输出 {{\"title\": \"...\"}}：\n\n{text}"
+                    )},
+                ],
+                max_tokens=128,
+            )
+            payload = loads_json_with_repair(content)
+        except (ValueError, GatewayError) as exc:
+            raise HTTPException(status_code=502, detail=f"标题生成模型调用失败：{exc}") from exc
+        title = str(payload.get("title") or "").strip().strip("\"'《》 .,。.")
+        if not title:
+            raise HTTPException(status_code=502, detail="模型未返回有效标题")
+        return title[:120]
 
     def _require_model_config(self) -> ModelConfigRecord:
         statement = select(ModelConfigRecord).where(

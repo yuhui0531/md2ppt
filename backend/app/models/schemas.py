@@ -161,6 +161,10 @@ class RenameProjectResponse(BaseModel):
     title: str
 
 
+class SuggestTitleResponse(BaseModel):
+    title: str
+
+
 class ParsedSection(BaseModel):
     id: str
     heading: str

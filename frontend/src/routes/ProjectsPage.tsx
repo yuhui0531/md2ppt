@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getModelConfig } from '../api/modelConfig';
-import { deleteProject, listProjects, renameProject } from '../api/projects';
+import { deleteProject, listProjects, renameProject, suggestProjectTitle } from '../api/projects';
 import { StatusMessage } from '../components/StatusMessage';
 import type { ProjectSummary } from '../types/api';
 import { projectStateLabel } from '../utils/projectPresentation';
 
 import { Card, Col, Row, Typography, Button, Space, Statistic, List, Tag, Popconfirm, Input, Alert, Empty } from 'antd';
-import { EditOutlined, DeleteOutlined, RightOutlined, ExportOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, RightOutlined, ExportOutlined, ThunderboltOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
@@ -72,6 +72,20 @@ export function ProjectsPage() {
       setMessage({ kind: 'success', text: '项目名称已更新。' });
     } catch (error) {
       setMessage({ kind: 'error', text: error instanceof Error ? error.message : '重命名失败' });
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  async function handleSuggestTitle(projectId: string) {
+    setActionBusy(`suggest:${projectId}`);
+    setMessage(null);
+    try {
+      const { title } = await suggestProjectTitle(projectId);
+      // 只填进输入框，不直接落库——让用户看一眼再决定是否保存。
+      setDraftTitle(title);
+    } catch (error) {
+      setMessage({ kind: 'error', text: error instanceof Error ? error.message : 'AI 生成标题失败' });
     } finally {
       setActionBusy(null);
     }
@@ -179,6 +193,15 @@ export function ProjectsPage() {
                 {editingProjectId === project.project_id ? (
                   <Space.Compact style={{ width: '100%' }}>
                     <Input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="输入项目名称" onPressEnter={() => handleRename(project.project_id)} />
+                    <Button
+                      icon={<ThunderboltOutlined />}
+                      onClick={() => handleSuggestTitle(project.project_id)}
+                      loading={actionBusy === `suggest:${project.project_id}`}
+                      disabled={actionBusy !== null && actionBusy !== `suggest:${project.project_id}`}
+                      title="让 AI 根据上传素材生成项目名"
+                    >
+                      AI 生成
+                    </Button>
                     <Button type="primary" onClick={() => handleRename(project.project_id)} loading={actionBusy === `rename:${project.project_id}`}>保存</Button>
                     <Button onClick={cancelRename}>取消</Button>
                   </Space.Compact>

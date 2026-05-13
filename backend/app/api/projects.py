@@ -10,7 +10,9 @@ from app.models.schemas import (
     ProjectResponse,
     RenameProjectRequest,
     RenameProjectResponse,
+    SuggestTitleResponse,
 )
+from app.services.generation_service import GenerationService
 from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -54,6 +56,18 @@ def rename_project(
 ) -> RenameProjectResponse:
     record = ProjectService(session).rename_project(project_id, request.title, user_id=user_id)
     return RenameProjectResponse(project_id=record.id, title=record.title)
+
+
+@router.post("/{project_id}/suggest-title", response_model=SuggestTitleResponse)
+async def suggest_project_title(
+    project_id: str,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> SuggestTitleResponse:
+    # 先校验归属，再让 GenerationService 拿用户自己的文本模型生成标题。
+    ProjectService(session)._get_owned_record(project_id, user_id)
+    title = await GenerationService(session, user_id).suggest_title(project_id)
+    return SuggestTitleResponse(title=title)
 
 
 @router.delete("/{project_id}", status_code=204)
