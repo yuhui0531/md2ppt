@@ -1,6 +1,7 @@
 from typing import Any, Callable
 
 import json
+import time
 
 import httpx
 from loguru import logger
@@ -129,6 +130,7 @@ class GatewayClient:
         }
         buffer = ""
         chunk_count = 0
+        started = time.monotonic()
         async with httpx.AsyncClient(
             timeout=_gateway_timeout(),
             follow_redirects=False,
@@ -169,15 +171,14 @@ class GatewayClient:
                                 raise
                         if len(buffer) > settings.max_gateway_response_bytes:
                             raise GatewayError("流式生成响应过大")
-                    elapsed = response.elapsed.total_seconds() if response.elapsed else 0.0
-                    logger.info(
-                        "[gateway] chat_completion_stream model={} max_tokens={} chunks={} bytes={} elapsed={:.2f}s",
-                        model, max_tokens, chunk_count, len(buffer), elapsed,
-                    )
+                logger.info(
+                    "[gateway] chat_completion_stream model={} max_tokens={} chunks={} bytes={} elapsed={:.2f}s",
+                    model, max_tokens, chunk_count, len(buffer), time.monotonic() - started,
+                )
             except httpx.HTTPError as exc:
                 logger.error(
-                    "[gateway] chat_completion_stream FAILED model={} chunks={} bytes={} error={}: {}",
-                    model, chunk_count, len(buffer), exc.__class__.__name__, exc,
+                    "[gateway] chat_completion_stream FAILED model={} chunks={} bytes={} elapsed={:.2f}s error={}: {}",
+                    model, chunk_count, len(buffer), time.monotonic() - started, exc.__class__.__name__, exc,
                 )
                 raise GatewayError(f"流式生成请求失败：{exc.__class__.__name__}") from exc
         if not buffer:

@@ -551,8 +551,19 @@ class GenerationService:
     def _require_model_config(self) -> ModelConfigRecord:
         statement = select(ModelConfigRecord).where(ModelConfigRecord.kind == "text")
         config = self.session.exec(statement).first()
-        if not config or not config.configured:
+        if not config:
+            logger.warning("[generation] require_model_config: no ModelConfigRecord(kind='text') row in DB")
             raise HTTPException(status_code=400, detail="请先完成模型配置")
+        if not config.configured:
+            logger.warning(
+                "[generation] require_model_config: record exists but configured=False id={} base_url={} selected_model={}",
+                config.id, config.base_url, config.selected_model,
+            )
+            raise HTTPException(status_code=400, detail="请先完成模型配置")
+        logger.info(
+            "[generation] require_model_config ok id={} base_url={} selected_model={}",
+            config.id, config.base_url, config.selected_model,
+        )
         return config
 
     @staticmethod
