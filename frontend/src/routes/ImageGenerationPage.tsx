@@ -36,13 +36,14 @@ export function ImageGenerationPage() {
   async function handleGenerateAll() {
     if (!project) return;
     setBusy(true);
+    const baselineUrls = new Map(project.slides.map((s) => [s.slide_no, s.image_url ?? null]));
     setGeneratingSlides(project.slides.map((s) => s.slide_no));
     setMessage(null);
     setJob(null);
     try {
       const createdJob = await generateImages(project.project_id, { slide_numbers: null });
       setJob(createdJob);
-      const finalJob = await pollAndRefresh(createdJob.job_id);
+      const finalJob = await pollAndRefresh(createdJob.job_id, baselineUrls);
       if (finalJob.error) {
         setMessage({ kind: 'error', text: `批量生图存在失败：${finalJob.error}` });
       } else {
@@ -59,6 +60,7 @@ export function ImageGenerationPage() {
   async function handleRetrySlide(slideNo: number) {
     if (!project) return;
     setBusy(true);
+    const baselineUrls = new Map(project.slides.map((s) => [s.slide_no, s.image_url ?? null]));
     setGeneratingSlides([slideNo]);
     setMessage(null);
     setJob(null);
@@ -68,7 +70,7 @@ export function ImageGenerationPage() {
         extra_prompt: retryPrompt.trim() || null,
       });
       setJob(createdJob);
-      const finalJob = await pollAndRefresh(createdJob.job_id);
+      const finalJob = await pollAndRefresh(createdJob.job_id, baselineUrls);
       if (finalJob.error) {
         setMessage({ kind: 'error', text: `第${slideNo}页重试失败：${finalJob.error}` });
       } else {
@@ -98,7 +100,7 @@ export function ImageGenerationPage() {
     }
   }
 
-  async function pollAndRefresh(jobId: string): Promise<JobResponse> {
+  async function pollAndRefresh(jobId: string, baselineUrls: Map<number, string | null>): Promise<JobResponse> {
     while (true) {
       await new Promise((resolve) => window.setTimeout(resolve, 2000));
       const latest = await getJob(jobId);
@@ -106,6 +108,13 @@ export function ImageGenerationPage() {
       if (project) {
         const updated = await getProject(project.project_id);
         setProject(updated);
+        setGeneratingSlides((prev) => prev.filter((slideNo) => {
+          const updatedSlide = updated.slides.find((s) => s.slide_no === slideNo);
+          if (!updatedSlide) return false;
+          const baseline = baselineUrls.get(slideNo) ?? null;
+          const current = updatedSlide.image_url ?? null;
+          return current === baseline;
+        }));
       }
       if (latest.status === 'completed') return latest;
       if (latest.status === 'failed') throw new Error(latest.error || '生图失败');
