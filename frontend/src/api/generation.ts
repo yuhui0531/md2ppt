@@ -12,6 +12,10 @@ export function getJob(jobId: string): Promise<JobResponse> {
   return api(`/api/jobs/${jobId}`);
 }
 
+export function getActiveJob(projectId: string): Promise<JobResponse | null> {
+  return api<JobResponse | null>(`/api/projects/${projectId}/active-job`);
+}
+
 export function cancelJob(jobId: string): Promise<JobResponse> {
   return api(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
 }

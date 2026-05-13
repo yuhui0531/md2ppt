@@ -266,6 +266,7 @@ class GenerateProjectRequest(BaseModel):
 class JobResponse(BaseModel):
     job_id: str
     project_id: str
+    kind: str = "generation"
     status: str
     stage: str | None = None
     progress: float | None = None

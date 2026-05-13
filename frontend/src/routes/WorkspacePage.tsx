@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getProject } from '../api/projects';
-import { checkConsistency, generateProject, regeneratePrompts, reviseInconsistentPrompts } from '../api/generation';
+import { checkConsistency, generateProject, getActiveJob, regeneratePrompts, reviseInconsistentPrompts } from '../api/generation';
 import { ConsistencyReportView } from '../components/ConsistencyReportView';
 import { JobProgress } from '../components/JobProgress';
 import { MarkdownPreview } from '../components/MarkdownPreview';
@@ -35,8 +35,58 @@ export function WorkspacePage() {
 
   useEffect(() => {
     if (!projectId) return;
-    getProject(projectId).then(setProject).catch((error) => setMessage({ kind: 'error', text: error instanceof Error ? error.message : '加载项目失败' }));
+    // 同一组件实例切换 projectId（路由 param 变化）时 React 会保留 state。
+    // 必须在新 effect 启动前清掉上一个项目残留的 job/busy/message，
+    // 否则 attach 还没找到新项目的任务，旧项目的进度条会闪在新项目页面上。
+    setJob(null);
+    setBusy(null);
+    setMessage(null);
+    let cancelled = false;
+    (async () => {
+      // Phase 1: 加载项目 + 探测进行中的任务（任意 kind，因为 409 规则与 kind 无关）。
+      let active;
+      try {
+        const proj = await getProject(projectId);
+        if (cancelled) return;
+        setProject(proj);
+        active = await getActiveJob(projectId);
+      } catch (error) {
+        if (cancelled) return;
+        setMessage({ kind: 'error', text: error instanceof Error ? error.message : '加载项目失败' });
+        return;
+      }
+      if (cancelled || !active) return;
+      setJob(active);
+
+      // Phase 2: 等任务结束。不管是哪种 kind 都要等（解锁按钮），
+      // 但只有 generation 类的成功/失败提示才会在这页显示，
+      // image_generation 的提示交给生图页处理。
+      try {
+        const finalJob = await pollJobUntilFinished(active.job_id, (latest) => {
+          if (!cancelled) setJob(latest);
+        });
+        if (cancelled) return;
+        const updated = await getProject(projectId);
+        setProject(updated);
+        if (active.kind === 'generation' && !finalJob.error) {
+          setMessage({ kind: 'success', text: '已自动接续完成进行中的任务' });
+        }
+      } catch (error) {
+        if (cancelled) return;
+        if (active.kind === 'generation') {
+          setMessage({ kind: 'error', text: error instanceof Error ? error.message : '接续任务失败' });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, setProject]);
+
+  // 任务是否在跑（任意类型）：用于禁用所有会和后台并发写 ProjectData 的按钮。
+  const jobRunning = job?.status === 'running';
+  // 当前页只接管 PPT 生成进度的展示；其它类型的任务在自己的页面显示。
+  const displayJob = job?.kind === 'generation' ? job : null;
 
   async function refreshWith(action: () => Promise<ProjectData>, success: string) {
     setBusy(success);
@@ -54,6 +104,9 @@ export function WorkspacePage() {
 
   async function resumeGeneration() {
     if (!project) return;
+    // 已经有任务在跑（可能是首屏 useEffect 接续的，也可能是刚点过一次还没轮询完），
+    // 不要再发 POST 触发 409；按钮 disabled/loading 已经覆盖这条路径，这里是双保险。
+    if (jobRunning) return;
     setBusy('继续生成');
     setMessage(null);
     setJob(null);
@@ -98,8 +151,13 @@ export function WorkspacePage() {
           </div>
           <Space wrap>
             {canResume && (
-              <Button icon={<PlayCircleOutlined />} onClick={resumeGeneration} disabled={busy !== null} loading={busy === '继续生成'}>
-                继续生成
+              <Button
+                icon={<PlayCircleOutlined />}
+                onClick={resumeGeneration}
+                disabled={busy !== null || jobRunning}
+                loading={busy === '继续生成' || jobRunning}
+              >
+                {jobRunning ? '任务执行中…' : '继续生成'}
               </Button>
             )}
             <Link to={`/workspace/${project.project_id}/images`}>
@@ -115,7 +173,7 @@ export function WorkspacePage() {
       {message && (
         <Alert message={message.text} type={message.kind === 'error' ? 'error' : (message.kind === 'success' ? 'success' : 'info')} showIcon />
       )}
-      <JobProgress job={job} />
+      <JobProgress job={displayJob} />
 
       {/* 素材结构 - collapsible, shows ALL sections when expanded */}
       <Collapse
@@ -204,7 +262,7 @@ export function WorkspacePage() {
               <Title level={4} style={{ margin: 0 }}>{slide ? getCurrentSlideHeading(slide) : '当前页详情'}</Title>
               <Button
                 icon={<SyncOutlined />}
-                disabled={!slide || busy !== null}
+                disabled={!slide || busy !== null || jobRunning}
                 loading={busy === '已重新生成当前页 prompt'}
                 onClick={() => refreshWith(() => regeneratePrompts(project.project_id, [slide!.slide_no]), '已重新生成当前页 prompt')}
               >
@@ -301,7 +359,7 @@ export function WorkspacePage() {
               <Button
                 block
                 icon={<CheckCircleOutlined />}
-                disabled={busy !== null}
+                disabled={busy !== null || jobRunning}
                 loading={busy === '一致性检查已完成'}
                 onClick={() => refreshWith(() => checkConsistency(project.project_id, project.generation_options.consistency_threshold), '一致性检查已完成')}
               >
@@ -311,7 +369,7 @@ export function WorkspacePage() {
                 block
                 type="primary"
                 ghost
-                disabled={busy !== null}
+                disabled={busy !== null || jobRunning}
                 loading={busy === '不一致页面已修正'}
                 onClick={() => refreshWith(() => reviseInconsistentPrompts(project.project_id, project.generation_options.consistency_threshold), '不一致页面已修正')}
               >

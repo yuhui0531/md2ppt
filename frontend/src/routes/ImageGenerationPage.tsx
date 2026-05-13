@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getProject } from '../api/projects';
 import { generateImages, exportPptx } from '../api/imageGeneration';
-import { getJob } from '../api/generation';
+import { getActiveJob, getJob } from '../api/generation';
 import { ImageLightbox } from '../components/ImageLightbox';
 import type { GalleryImage } from '../components/ImageLightbox';
 import { JobProgress } from '../components/JobProgress';
@@ -30,7 +30,74 @@ export function ImageGenerationPage() {
 
   useEffect(() => {
     if (!projectId) return;
-    getProject(projectId).then(setProject).catch((error) => setMessage({ kind: 'error', text: error instanceof Error ? error.message : '加载项目失败' }));
+    // 同一组件实例切换 projectId（路由 param 变化）时 React 会保留 state。
+    // 必须在新 effect 启动前清掉上一个项目残留的状态，避免新项目页面继承
+    // 旧项目的 busy 锁、进度条、generatingSlides 覆盖层等。
+    setJob(null);
+    setBusy(false);
+    setMessage(null);
+    setGeneratingSlides([]);
+    setRetryingSlide(null);
+    setRetryPrompt('');
+    let cancelled = false;
+    (async () => {
+      try {
+        // 串行：先 getProject 让画面立刻可见，再探测进行中的任务，
+        // 避免两个并发 setProject 互相覆盖。
+        const proj = await getProject(projectId);
+        if (cancelled) return;
+        setProject(proj);
+
+        const active = await getActiveJob(projectId);
+        if (cancelled || !active) return;
+        // 后台并发规则：同一项目只能有一个 running 任务（无论 kind）。
+        // 所以无论拿到的是不是生图任务，都 setBusy(true)，让"开始批量生图"
+        // 在 PPT 生成跑完前保持 disabled；进度条则只在 image_generation 时显示。
+        setJob(active);
+        setBusy(true);
+        while (!cancelled) {
+          await new Promise((resolve) => window.setTimeout(resolve, 2000));
+          if (cancelled) return;
+          const latest = await getJob(active.job_id);
+          if (cancelled) return;
+          setJob(latest);
+          // 只在我们真的在跑生图任务时去拉项目数据（图片 URL 增量更新）。
+          // 别的类型的任务对生图页 UI 没影响，省一次 GET。
+          if (latest.kind === 'image_generation') {
+            const updated = await getProject(projectId);
+            if (cancelled) return;
+            setProject(updated);
+          }
+          if (latest.status === 'completed') {
+            if (latest.kind === 'image_generation') {
+              if (!latest.error) setMessage({ kind: 'success', text: '已自动接续完成进行中的批量生图' });
+              else setMessage({ kind: 'error', text: `批量生图存在失败：${latest.error}` });
+            }
+            break;
+          }
+          if (latest.status === 'failed') {
+            if (latest.kind === 'image_generation') {
+              setMessage({ kind: 'error', text: latest.error || latest.message || '生图失败' });
+            }
+            break;
+          }
+          if (latest.status === 'cancelled') {
+            if (latest.kind === 'image_generation') {
+              setMessage({ kind: 'error', text: '任务已取消' });
+            }
+            break;
+          }
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setMessage({ kind: 'error', text: error instanceof Error ? error.message : '加载项目失败' });
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, setProject]);
 
   async function handleGenerateAll() {
@@ -127,6 +194,8 @@ export function ImageGenerationPage() {
   }
 
   const hasAnyPrompt = project.slides.some((s) => s.prompt);
+  // 只展示生图任务的进度条；PPT 生成任务的进度由工作台负责显示。
+  const displayJob = job?.kind === 'image_generation' ? job : null;
 
   const galleryImages: GalleryImage[] = project.slides
     .filter((s) => s.image_url)
@@ -142,7 +211,7 @@ export function ImageGenerationPage() {
           </div>
           <Space wrap>
             <Button type="primary" icon={<PictureOutlined />} onClick={handleGenerateAll} disabled={busy || !hasAnyPrompt} loading={busy && generatingSlides.length > 1}>
-              {project.slides.some((s) => s.image_url) ? '重新批量生成' : '开始批量生图'}
+              {busy && !displayJob ? '任务执行中…' : (project.slides.some((s) => s.image_url) ? '重新批量生成' : '开始批量生图')}
             </Button>
             <Button icon={<DownloadOutlined />} onClick={handleExportPptx} disabled={busy || !project.slides.some((s) => s.image_url)}>
               下载 PPT
@@ -157,7 +226,7 @@ export function ImageGenerationPage() {
       {message && (
         <Alert message={message.text} type={message.kind === 'error' ? 'error' : (message.kind === 'success' ? 'success' : 'info')} showIcon />
       )}
-      <JobProgress job={job} />
+      <JobProgress job={displayJob} />
 
       <Row gutter={[24, 24]}>
         {project.slides.map((slide) => (

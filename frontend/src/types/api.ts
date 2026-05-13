@@ -149,6 +149,7 @@ export interface ProjectSummary {
 export interface JobResponse {
   job_id: string;
   project_id: string;
+  kind: string;
   status: string;
   stage?: string | null;
   progress?: number | null;

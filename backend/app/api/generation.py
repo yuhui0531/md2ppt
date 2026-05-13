@@ -50,12 +50,13 @@ async def generate_project(
     job_service = JobService(session)
     if job_service.has_active_job(project_id):
         raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
-    job = job_service.create_job(project_id)
+    job = job_service.create_job(project_id, kind="generation")
     job_service.update(job, stage="queued", progress=0.02, message="生成任务已创建", status="running")
     asyncio.create_task(_run_generation_job(job.id, project_id, request.mode, user_id))
     return JobResponse(
         job_id=job.id,
         project_id=job.project_id,
+        kind=job.kind,
         status=job.status,
         stage=job.stage,
         progress=job.progress,
@@ -86,6 +87,31 @@ async def _run_generation_job(job_id: str, project_id: str, mode: str, user_id: 
             job_service.update(job, stage="failed", progress=job.progress, message="生成失败", status="failed", error=str(exc))
 
 
+@router.get("/api/projects/{project_id}/active-job", response_model=JobResponse | None)
+def get_active_job_for_project(
+    project_id: str,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> JobResponse | None:
+    """工作台进入时用这个轻量端点探测是否已有任务在跑：
+    有就让前端直接挂上去显示进度条 + 轮询，没有就返回 null。
+    顺带由 JobService 把僵尸任务标记 failed，避免前端永远卡进度。"""
+    _assert_project_owner(session, project_id, user_id)
+    job = JobService(session).get_active_job(project_id)
+    if not job:
+        return None
+    return JobResponse(
+        job_id=job.id,
+        project_id=job.project_id,
+        kind=job.kind,
+        status=job.status,
+        stage=job.stage,
+        progress=job.progress,
+        message=job.message,
+        error=job.error,
+    )
+
+
 @router.get("/api/jobs/{job_id}", response_model=JobResponse)
 def get_job(
     job_id: str,
@@ -96,6 +122,7 @@ def get_job(
     return JobResponse(
         job_id=job.id,
         project_id=job.project_id,
+        kind=job.kind,
         status=job.status,
         stage=job.stage,
         progress=job.progress,
@@ -112,7 +139,7 @@ def cancel_job(
 ) -> JobResponse:
     _assert_job_owner(session, job_id, user_id)
     job = JobService(session).cancel(job_id)
-    return JobResponse(job_id=job.id, project_id=job.project_id, status=job.status, stage=job.stage, progress=job.progress, message=job.message, error=job.error)
+    return JobResponse(job_id=job.id, project_id=job.project_id, kind=job.kind, status=job.status, stage=job.stage, progress=job.progress, message=job.message, error=job.error)
 
 
 @router.post("/api/projects/{project_id}/regenerate-outline", response_model=ProjectResponse)
@@ -180,12 +207,13 @@ async def generate_images(
     job_service = JobService(session)
     if job_service.has_active_job(project_id):
         raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
-    job = job_service.create_job(project_id)
+    job = job_service.create_job(project_id, kind="image_generation")
     job_service.update(job, stage="queued", progress=0.0, message="批量生图任务已创建", status="running")
     asyncio.create_task(_run_image_generation_job(job.id, project_id, request.slide_numbers, request.extra_prompt, user_id))
     return JobResponse(
         job_id=job.id,
         project_id=job.project_id,
+        kind=job.kind,
         status=job.status,
         stage=job.stage,
         progress=job.progress,

@@ -125,6 +125,35 @@ def _apply_model_config_user_id_migration() -> None:
         conn.close()
 
 
+def _needs_job_kind_migration() -> bool:
+    db_path = settings.storage_dir / "app.db"
+    if not db_path.exists():
+        return False
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cursor = conn.execute("PRAGMA table_info(jobrecord)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if not columns:
+            return False
+        return "kind" not in columns
+    finally:
+        conn.close()
+
+
+def _apply_job_kind_migration() -> None:
+    """给 jobrecord 加 kind 列，区分 PPT 生成 vs 批量生图。
+    历史行一律按 "generation" 处理：旧库里能跑的都是 PPT 生成，
+    生图任务在加 kind 前还没上线。"""
+    db_path = settings.storage_dir / "app.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("ALTER TABLE jobrecord ADD COLUMN kind VARCHAR NOT NULL DEFAULT 'generation'")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_jobrecord_kind ON jobrecord(kind)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     (settings.storage_dir / "uploads").mkdir(parents=True, exist_ok=True)
@@ -144,6 +173,9 @@ def init_db() -> None:
 
     if _needs_model_config_user_id_migration():
         _apply_model_config_user_id_migration()
+
+    if _needs_job_kind_migration():
+        _apply_job_kind_migration()
 
     SQLModel.metadata.create_all(engine)
 
