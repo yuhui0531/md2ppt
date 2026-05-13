@@ -15,12 +15,16 @@ MAX_CONCURRENCY = 3
 
 
 class ImageGenerationService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, user_id: int) -> None:
         self.session = session
+        self.user_id = user_id
         self.project_service = ProjectService(session)
 
     def get_image_config(self) -> ModelConfigRecord:
-        statement = select(ModelConfigRecord).where(ModelConfigRecord.kind == "image")
+        statement = select(ModelConfigRecord).where(
+            ModelConfigRecord.kind == "image",
+            ModelConfigRecord.user_id == self.user_id,
+        )
         config = self.session.exec(statement).first()
         if not config or not config.configured:
             raise HTTPException(status_code=400, detail="请先完成生图模型配置")

@@ -52,7 +52,7 @@ async def generate_project(
         raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
     job = job_service.create_job(project_id)
     job_service.update(job, stage="queued", progress=0.02, message="生成任务已创建", status="running")
-    asyncio.create_task(_run_generation_job(job.id, project_id, request.mode))
+    asyncio.create_task(_run_generation_job(job.id, project_id, request.mode, user_id))
     return JobResponse(
         job_id=job.id,
         project_id=job.project_id,
@@ -64,12 +64,14 @@ async def generate_project(
     )
 
 
-async def _run_generation_job(job_id: str, project_id: str, mode: str) -> None:
+async def _run_generation_job(job_id: str, project_id: str, mode: str, user_id: int) -> None:
+    # user_id 由调用方在请求线程内从 JWT 取出后透传进来：
+    # 后台任务自己没有 request/cookie，必须显式带上才能找到该用户的模型配置。
     with Session(engine) as session:
         job_service = JobService(session)
         job = job_service.get_job(job_id)
         try:
-            await GenerationService(session).run_generation(project_id, mode=mode, job_service=job_service, job=job)
+            await GenerationService(session, user_id).run_generation(project_id, mode=mode, job_service=job_service, job=job)
             if job.status != "cancelled":
                 job_service.update(job, stage="consistency_checked", progress=1.0, message="生成完成", status="completed")
         except HTTPException as exc:
@@ -121,11 +123,11 @@ async def regenerate_outline(
     user_id: int = Depends(get_current_user_id),
 ) -> ProjectResponse:
     _assert_project_owner(session, project_id, user_id)
-    data = GenerationService(session).project_service.get_project_data_internal(project_id)
+    data = GenerationService(session, user_id).project_service.get_project_data_internal(project_id)
     data.generation_options.slide_count_mode = request.slide_count_mode
     data.generation_options.requested_slide_count = request.requested_slide_count
     data.generation_options.requested_slide_range = request.requested_slide_range
-    service = GenerationService(session)
+    service = GenerationService(session, user_id)
     updated = await service.regenerate_outline(project_id, data.generation_options)
     return ProjectResponse(project=updated)
 
@@ -138,7 +140,7 @@ async def regenerate_prompts(
     user_id: int = Depends(get_current_user_id),
 ) -> ProjectResponse:
     _assert_project_owner(session, project_id, user_id)
-    updated = await GenerationService(session).regenerate_prompts(project_id, request.slide_numbers)
+    updated = await GenerationService(session, user_id).regenerate_prompts(project_id, request.slide_numbers)
     return ProjectResponse(project=updated)
 
 
@@ -150,7 +152,7 @@ async def check_consistency(
     user_id: int = Depends(get_current_user_id),
 ) -> ProjectResponse:
     _assert_project_owner(session, project_id, user_id)
-    updated = await GenerationService(session).check_consistency_for_project(project_id, request.threshold)
+    updated = await GenerationService(session, user_id).check_consistency_for_project(project_id, request.threshold)
     return ProjectResponse(project=updated)
 
 
@@ -162,7 +164,7 @@ async def revise_inconsistent_prompts(
     user_id: int = Depends(get_current_user_id),
 ) -> ProjectResponse:
     _assert_project_owner(session, project_id, user_id)
-    updated = await GenerationService(session).revise_inconsistent_prompts(project_id, request.threshold)
+    updated = await GenerationService(session, user_id).revise_inconsistent_prompts(project_id, request.threshold)
     return ProjectResponse(project=updated)
 
 
@@ -174,13 +176,13 @@ async def generate_images(
     user_id: int = Depends(get_current_user_id),
 ) -> JobResponse:
     _assert_project_owner(session, project_id, user_id)
-    ImageGenerationService(session).get_image_config()
+    ImageGenerationService(session, user_id).get_image_config()
     job_service = JobService(session)
     if job_service.has_active_job(project_id):
         raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
     job = job_service.create_job(project_id)
     job_service.update(job, stage="queued", progress=0.0, message="批量生图任务已创建", status="running")
-    asyncio.create_task(_run_image_generation_job(job.id, project_id, request.slide_numbers, request.extra_prompt))
+    asyncio.create_task(_run_image_generation_job(job.id, project_id, request.slide_numbers, request.extra_prompt, user_id))
     return JobResponse(
         job_id=job.id,
         project_id=job.project_id,
@@ -192,12 +194,14 @@ async def generate_images(
     )
 
 
-async def _run_image_generation_job(job_id: str, project_id: str, slide_numbers: list[int] | None, extra_prompt: str | None = None) -> None:
+async def _run_image_generation_job(job_id: str, project_id: str, slide_numbers: list[int] | None, extra_prompt: str | None = None, user_id: int = -1) -> None:
+    # 同 _run_generation_job：user_id 用于在后台任务里定位调用者的生图模型配置。
+    # 默认 -1 仅是签名兜底；正常路径下 API 入口一定会传真实 user_id 进来。
     with Session(engine) as session:
         job_service = JobService(session)
         job = job_service.get_job(job_id)
         try:
-            await ImageGenerationService(session).run_batch_generation(
+            await ImageGenerationService(session, user_id).run_batch_generation(
                 project_id, slide_numbers, job_service, job, extra_prompt=extra_prompt
             )
         except Exception as exc:

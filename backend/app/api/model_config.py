@@ -33,7 +33,10 @@ def get_model_config(
     session: Session = Depends(get_session),
     user_id: int = Depends(get_current_user_id),
 ):
-    statement = select(ModelConfigRecord).where(ModelConfigRecord.kind == kind)
+    statement = select(ModelConfigRecord).where(
+        ModelConfigRecord.kind == kind,
+        ModelConfigRecord.user_id == user_id,
+    )
     record = session.exec(statement).first()
     if kind == "image":
         if not record or not record.configured:
@@ -126,7 +129,10 @@ def save_model_config(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    statement = select(ModelConfigRecord).where(ModelConfigRecord.kind == "text")
+    statement = select(ModelConfigRecord).where(
+        ModelConfigRecord.kind == "text",
+        ModelConfigRecord.user_id == user_id,
+    )
     record = session.exec(statement).first()
     now = datetime.now(timezone.utc)
 
@@ -141,6 +147,7 @@ def save_model_config(
         record.updated_at = now
     else:
         record = ModelConfigRecord(
+            user_id=user_id,
             kind="text",
             base_url=base_url,
             api_key_encrypted=request.api_key,
@@ -168,7 +175,10 @@ def save_image_model_config(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    statement = select(ModelConfigRecord).where(ModelConfigRecord.kind == "image")
+    statement = select(ModelConfigRecord).where(
+        ModelConfigRecord.kind == "image",
+        ModelConfigRecord.user_id == user_id,
+    )
     record = session.exec(statement).first()
     now = datetime.now(timezone.utc)
 
@@ -182,6 +192,7 @@ def save_image_model_config(
         record.updated_at = now
     else:
         record = ModelConfigRecord(
+            user_id=user_id,
             kind="image",
             base_url=base_url,
             api_key_encrypted=request.api_key,

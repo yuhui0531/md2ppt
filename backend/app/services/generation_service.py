@@ -84,8 +84,9 @@ def _count_complete_slides(buffer: str) -> int:
 
 
 class GenerationService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, user_id: int) -> None:
         self.session = session
+        self.user_id = user_id
         self.project_service = ProjectService(session)
         self.template_service = TemplateService()
 
@@ -549,7 +550,10 @@ class GenerationService:
             raise HTTPException(status_code=502, detail=f"{stage}模型返回非 JSON（{config.selected_model}）：{exc}, payload={payload}") from exc
 
     def _require_model_config(self) -> ModelConfigRecord:
-        statement = select(ModelConfigRecord).where(ModelConfigRecord.kind == "text")
+        statement = select(ModelConfigRecord).where(
+            ModelConfigRecord.kind == "text",
+            ModelConfigRecord.user_id == self.user_id,
+        )
         config = self.session.exec(statement).first()
         if not config:
             logger.warning("[generation] require_model_config: no ModelConfigRecord(kind='text') row in DB")
