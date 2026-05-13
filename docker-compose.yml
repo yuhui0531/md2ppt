@@ -7,29 +7,29 @@ services:
     restart: unless-stopped
     environment:
       # ---- SSO ----
-      APP_SSO_VERIFY_URL: ${APP_SSO_VERIFY_URL:?需要在 .env 中提供 SSO 校验地址}
-      APP_SSO_CLIENT_ID: ${APP_SSO_CLIENT_ID:?需要在 .env 中提供 SSO clientId}
-      APP_SSO_CLIENT_SECRET: ${APP_SSO_CLIENT_SECRET:?需要在 .env 中提供 SSO clientSecret}
+      APP_SSO_VERIFY_URL: ${APP_SSO_VERIFY_URL:?APP_SSO_VERIFY_URL is required}
+      APP_SSO_CLIENT_ID: ${APP_SSO_CLIENT_ID:?APP_SSO_CLIENT_ID is required}
+      APP_SSO_CLIENT_SECRET: ${APP_SSO_CLIENT_SECRET:?APP_SSO_CLIENT_SECRET is required}
       APP_SSO_TRUSTED_ORIGINS: ${APP_SSO_TRUSTED_ORIGINS:-["third-party.example.com"]}
       APP_SSO_TIMEOUT_SECONDS: ${APP_SSO_TIMEOUT_SECONDS:-5}
 
-      # ---- JWT（HttpOnly Cookie）----
-      APP_JWT_SECRET: ${APP_JWT_SECRET:?需要在 .env 中提供 JWT 密钥（openssl rand -hex 32）}
+      # ---- JWT (HttpOnly cookie) ----
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?APP_JWT_SECRET is required (openssl rand -hex 32)}
       APP_JWT_TTL_SECONDS: ${APP_JWT_TTL_SECONDS:-3600}
       APP_JWT_COOKIE_SECURE: ${APP_JWT_COOKIE_SECURE:-false}
 
-      # ---- 前端跳转 ----
+      # ---- Frontend redirect paths ----
       APP_FRONTEND_HOME_PATH: ${APP_FRONTEND_HOME_PATH:-/projects}
       APP_FRONTEND_FAILED_PATH: ${APP_FRONTEND_FAILED_PATH:-/sso/failed}
 
-      # ---- 日志 ----
+      # ---- Logging ----
       APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
     volumes:
       - md2ppt_storage:/app/app/storage
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8008/api/health', timeout=3).status==200 else 1)"]
+      test: [ "CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8008/api/health', timeout=3).status==200 else 1)" ]
       interval: 30s
       timeout: 5s
       retries: 5
