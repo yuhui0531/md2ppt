@@ -6,6 +6,7 @@ from loguru import logger
 from sqlmodel import Session, select
 
 from app.models.job import JobRecord
+from app.models.time import ensure_utc
 
 JOB_TIMEOUT_SECONDS = 180
 
@@ -32,7 +33,7 @@ class JobService:
         job = self.session.exec(statement).first()
         if not job:
             return False
-        elapsed = (datetime.now(timezone.utc) - job.updated_at).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - ensure_utc(job.updated_at)).total_seconds()
         if elapsed > JOB_TIMEOUT_SECONDS:
             job.status = "failed"
             job.stage = "timeout"
