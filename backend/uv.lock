@@ -341,7 +341,7 @@ wheels = [
 ]
 
 [[package]]
-name = "markdown-ppt-prompt-app"
+name = "md2ppt"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
