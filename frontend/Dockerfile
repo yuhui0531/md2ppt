@@ -13,6 +13,10 @@ RUN npm run build
 
 FROM cdhx78.seeyon.com:5356/library/nginx:latest-all
 
+COPY --from=builder /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+RUN echo "Asia/Shanghai" > /etc/timezone
+ENV TZ=Asia/Shanghai
+
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
