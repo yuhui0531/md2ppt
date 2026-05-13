@@ -70,15 +70,15 @@ async def sso_login(request: Request, ssoToken: str | None = None) -> RedirectRe
         return _home_redirect()
 
     # ② Login CSRF 兜底
-    if not _is_trusted_origin(request):
-        logger.warning(
-            "sso login rejected UNTRUSTED_ORIGIN ip={} origin={} referer={} trusted={}",
-            client_ip,
-            origin,
-            referer,
-            settings.sso_trusted_origins,
-        )
-        return _failed_redirect("UNTRUSTED_ORIGIN")
+    # if not _is_trusted_origin(request):
+    #     logger.warning(
+    #         "sso login rejected UNTRUSTED_ORIGIN ip={} origin={} referer={} trusted={}",
+    #         client_ip,
+    #         origin,
+    #         referer,
+    #         settings.sso_trusted_origins,
+    #     )
+    #     return _failed_redirect("UNTRUSTED_ORIGIN")
 
     try:
         user_id = await verify_sso_token(ssoToken or "")
