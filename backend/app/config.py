@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "REPLACE_ME_WITH_LONG_RANDOM"
     jwt_algorithm: str = "HS256"
     jwt_issuer: str = "md2ppt"
-    jwt_ttl_seconds: int = 60 * 60
+    jwt_ttl_seconds: int = 60 * 60 * 24 - 1200
     jwt_cookie_secure: bool = False
 
     # ---- 前端跳转 ----
