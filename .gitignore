@@ -4,8 +4,10 @@ __pycache__/
 .env
 .env.*
 backend/app/storage/*.db
+backend/app/storage/*.bak
 backend/app/storage/exports/*
 backend/app/storage/uploads/*
+backend/app/storage/images/*
 frontend/node_modules/
 frontend/dist/
 .DS_Store

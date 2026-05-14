@@ -5,6 +5,7 @@ from loguru import logger
 from sqlmodel import Session, select
 
 from app.core.gateway_client import GatewayClient, GatewayError
+from app.core.image_storage import save_data_uri
 from app.models.job import JobRecord
 from app.models.model_config import ModelConfigRecord
 from app.models.schemas import ProjectData
@@ -67,7 +68,11 @@ class ImageGenerationService:
                         size=config.image_size or "2048x1152",
                         quality=config.image_quality or "hd",
                     )
-                    data.slides[slide_index].image_url = image_url
+                    # 网关常常以 data:image/png;base64,... 形式返回（即便我们要求 url）。
+                    # 这里立刻落盘换成 `/api/images/...` 短路径，避免把 ~3MB base64
+                    # 文本反复写进 projectrecord.data_json。落盘失败就回退到原值。
+                    saved = save_data_uri(project_id, slide_no, image_url)
+                    data.slides[slide_index].image_url = saved or image_url
                 except (ValueError, GatewayError) as exc:
                     failed_pages.append(slide_no)
                     logger.warning("[image-gen] slide {} failed: {}", slide_no, exc)

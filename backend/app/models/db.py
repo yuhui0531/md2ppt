@@ -158,6 +158,7 @@ def init_db() -> None:
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     (settings.storage_dir / "uploads").mkdir(parents=True, exist_ok=True)
     (settings.storage_dir / "exports").mkdir(parents=True, exist_ok=True)
+    (settings.storage_dir / "images").mkdir(parents=True, exist_ok=True)
 
     if _needs_migration():
         db_path = settings.storage_dir / "app.db"

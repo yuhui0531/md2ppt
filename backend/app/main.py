@@ -8,6 +8,7 @@ from loguru import logger
 
 from app.api.export import router as export_router
 from app.api.generation import router as generation_router
+from app.api.images import router as images_router
 from app.api.model_config import router as model_config_router
 from app.api.projects import router as projects_router
 from app.api.sso import router as sso_router
@@ -55,6 +56,7 @@ app.include_router(model_config_router)
 app.include_router(projects_router)
 app.include_router(generation_router)
 app.include_router(export_router)
+app.include_router(images_router)
 app.include_router(sso_router)
 
 

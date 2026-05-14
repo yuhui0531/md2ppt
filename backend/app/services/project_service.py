@@ -1,11 +1,13 @@
 import json
 import re
+import shutil
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlmodel import Session, delete, select
 
+from app.core.image_storage import project_image_dir
 from app.models.job import JobRecord
 from app.models.project import ParsedSectionRecord, ProjectRecord
 from app.models.schemas import CreateProjectRequest, ParsedSection, ProjectData, ProjectSummary
@@ -142,6 +144,8 @@ class ProjectService:
         self.session.exec(delete(JobRecord).where(JobRecord.project_id == project_id))
         self.session.delete(record)
         self.session.commit()
+        # 删完 DB 再清盘上的图，DB 已是真值——即使清盘失败也不影响数据一致性。
+        shutil.rmtree(project_image_dir(project_id), ignore_errors=True)
 
     def _get_owned_record(self, project_id: str, user_id: int) -> ProjectRecord:
         if user_id <= 0:

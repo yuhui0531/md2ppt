@@ -13,6 +13,7 @@ from pptx.util import Emu, Inches
 from sqlmodel import Session
 
 from app.core.auth import get_current_user_id
+from app.core.image_storage import URL_PREFIX as IMAGES_URL_PREFIX, resolve_local_path
 from app.models.db import get_session
 from app.models.schemas import ExportRequest, ExportResponse
 from app.services.export_service import ExportService
@@ -91,6 +92,12 @@ async def export_pptx(
                 if image_url.startswith("data:"):
                     header, b64data = image_url.split(",", 1)
                     image_bytes = base64.b64decode(b64data)
+                elif image_url.startswith(IMAGES_URL_PREFIX):
+                    # 同进程内的落盘图：跳过 httpx 自调用，直接读盘。
+                    local = resolve_local_path(image_url)
+                    if not local or not local.exists():
+                        raise FileNotFoundError(image_url)
+                    image_bytes = local.read_bytes()
                 else:
                     resp = await client.get(image_url)
                     resp.raise_for_status()
