@@ -182,7 +182,9 @@ export function WorkspacePage() {
               </Button>
             )}
             <Link to={`/workspace/${project.project_id}/images`}>
-              <Button type="primary" icon={<PictureOutlined />}>下一步：准备生图</Button>
+              <Button type="primary" icon={<PictureOutlined />}>
+                {project.slides.some((s) => s.image_url) ? '查看图片' : '下一步：准备生图'}
+              </Button>
             </Link>
             <Link to={`/review/${project.project_id}`}>
               <Button icon={<ExportOutlined />}>批量导出提示词</Button>
