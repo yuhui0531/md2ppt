@@ -181,14 +181,19 @@ export function WorkspacePage() {
                 {jobRunning ? '任务执行中…' : '继续生成'}
               </Button>
             )}
-            <Link to={`/workspace/${project.project_id}/images`}>
-              <Button type="primary" icon={<PictureOutlined />}>
-                {project.slides.some((s) => s.image_url) ? '查看图片' : '下一步：准备生图'}
-              </Button>
-            </Link>
-            <Link to={`/review/${project.project_id}`}>
-              <Button icon={<ExportOutlined />}>批量导出提示词</Button>
-            </Link>
+            {(() => {
+              const navDisabled = busy !== null || jobRunning;
+              const hasImages = project.slides.some((s) => s.image_url);
+              const imagesLabel = hasImages ? '查看图片' : '下一步：准备生图';
+              const imagesBtn = <Button type="primary" icon={<PictureOutlined />} disabled={navDisabled}>{imagesLabel}</Button>;
+              const exportBtn = <Button icon={<ExportOutlined />} disabled={navDisabled}>批量导出提示词</Button>;
+              return (
+                <>
+                  {navDisabled ? imagesBtn : <Link to={`/workspace/${project.project_id}/images`}>{imagesBtn}</Link>}
+                  {navDisabled ? exportBtn : <Link to={`/review/${project.project_id}`}>{exportBtn}</Link>}
+                </>
+              );
+            })()}
           </Space>
         </div>
       </Card>
