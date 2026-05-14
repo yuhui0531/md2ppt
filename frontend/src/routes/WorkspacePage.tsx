@@ -9,7 +9,7 @@ import { StyleGuidePanel } from '../components/StyleGuidePanel';
 import { useProjectStore } from '../store/projectStore';
 import type { JobResponse, ProjectData } from '../types/api';
 import { pollJobUntilFinished } from '../utils/jobPolling';
-import { projectStateLabel } from '../utils/projectPresentation';
+import { projectStateLabel, pageTypeLabel } from '../utils/projectPresentation';
 
 import { CheckCircleOutlined, DownOutlined, ExportOutlined, PictureOutlined, PlayCircleOutlined, SyncOutlined, UpOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Col, Collapse, Input, Row, Space, Spin, Tabs, Tag, Typography } from 'antd';
@@ -152,7 +152,7 @@ export function WorkspacePage() {
   const slide = project.slides[activeSlide];
   const canResume = !['consistency_checked', 'revised'].includes(project.generation_state);
   const slideMetaItems = slide ? [
-    { label: '页面类型', value: slide.page_type },
+    { label: '页面类型', value: pageTypeLabel(slide.page_type) },
     { label: '页面角色', value: slide.page_role },
     { label: '版式建议', value: slide.layout },
   ].filter((item) => hasText(item.value)) : [];
@@ -264,7 +264,7 @@ export function WorkspacePage() {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                     <Text strong style={{ color: index === activeSlide ? '#1677ff' : 'inherit' }}>{getSlideLabel(item)}</Text>
-                    <Tag bordered={false} color={index === activeSlide ? 'blue' : 'default'} style={{ margin: 0, fontSize: 11 }}>{item.page_type}</Tag>
+                    <Tag bordered={false} color={index === activeSlide ? 'blue' : 'default'} style={{ margin: 0, fontSize: 11 }}>{pageTypeLabel(item.page_type)}</Tag>
                   </div>
                   <Text type="secondary" style={{ fontSize: 13, display: 'block' }}>{getSlideSummary(item)}</Text>
                 </div>
