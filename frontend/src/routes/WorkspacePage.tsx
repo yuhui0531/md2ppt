@@ -1,19 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { getProject } from '../api/projects';
 import { checkConsistency, generateProject, getActiveJob, regeneratePrompts, reviseInconsistentPrompts } from '../api/generation';
+import { getProject } from '../api/projects';
 import { ConsistencyReportView } from '../components/ConsistencyReportView';
 import { JobProgress } from '../components/JobProgress';
 import { MarkdownPreview } from '../components/MarkdownPreview';
-import { StatusMessage } from '../components/StatusMessage';
 import { StyleGuidePanel } from '../components/StyleGuidePanel';
 import { useProjectStore } from '../store/projectStore';
 import type { JobResponse, ProjectData } from '../types/api';
 import { pollJobUntilFinished } from '../utils/jobPolling';
 import { projectStateLabel } from '../utils/projectPresentation';
 
-import { Card, Col, Row, Typography, Button, Space, Tabs, Tag, Alert, Spin, Input, Collapse } from 'antd';
-import { PictureOutlined, CheckCircleOutlined, ExportOutlined, PlayCircleOutlined, SyncOutlined, DownOutlined, UpOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, DownOutlined, ExportOutlined, PictureOutlined, PlayCircleOutlined, SyncOutlined, UpOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Col, Collapse, Input, Row, Space, Spin, Tabs, Tag, Typography } from 'antd';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -183,10 +182,10 @@ export function WorkspacePage() {
               </Button>
             )}
             <Link to={`/workspace/${project.project_id}/images`}>
-              <Button type="primary" icon={<PictureOutlined />}>开始生图</Button>
+              <Button type="primary" icon={<PictureOutlined />}>下一步：准备生图</Button>
             </Link>
             <Link to={`/review/${project.project_id}`}>
-              <Button icon={<ExportOutlined />}>导出提示词</Button>
+              <Button icon={<ExportOutlined />}>批量导出提示词</Button>
             </Link>
           </Space>
         </div>

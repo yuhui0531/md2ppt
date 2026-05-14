@@ -25,7 +25,6 @@ services:
       # ---- Logging ----
       APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
 
-      # 容器时区（影响日志时间戳；DB 仍存 UTC，见 app/models/time.py）
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - md2ppt_storage:/app/app/storage

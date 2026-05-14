@@ -1,7 +1,7 @@
+import { FolderOpenOutlined, PlusSquareOutlined, SettingOutlined } from '@ant-design/icons';
+import { Layout, Menu, Typography } from 'antd';
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Layout, Menu, Typography, theme } from 'antd';
-import { PlusSquareOutlined, FolderOpenOutlined, SettingOutlined } from '@ant-design/icons';
 
 const { Sider, Content } = Layout;
 const { Title, Text } = Typography;
