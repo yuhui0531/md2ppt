@@ -78,12 +78,12 @@ export function UploadPage() {
 
   const handleUpload = (file: File) => {
     setFilename(file.name);
-    file.text().then((text) => {
-      setContent(text);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setContent(e.target?.result as string);
       message.success(`${file.name} 解析成功`);
-    }).catch(() => {
-      message.error(`${file.name} 读取失败`);
-    });
+    };
+    reader.readAsText(file);
     return false;
   };
 
