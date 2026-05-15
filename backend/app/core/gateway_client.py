@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any, Callable
 
 import json
@@ -10,9 +12,21 @@ from app.config import settings
 from app.core.security import validate_gateway_base_url
 
 
-def _gateway_timeout() -> httpx.Timeout:
+def gateway_timeout() -> httpx.Timeout:
     read = settings.gateway_timeout_seconds
     return httpx.Timeout(connect=15.0, read=read, write=30.0, pool=30.0)
+
+
+def gateway_limits() -> httpx.Limits:
+    return httpx.Limits(max_connections=10, max_keepalive_connections=5)
+
+
+def build_gateway_async_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        timeout=gateway_timeout(),
+        follow_redirects=False,
+        limits=gateway_limits(),
+    )
 
 
 def _log_response(tag: str, response: httpx.Response, **extra: Any) -> None:
@@ -32,20 +46,26 @@ class GatewayError(Exception):
 
 
 class GatewayClient:
-    def __init__(self, base_url: str, api_key: str) -> None:
+    def __init__(self, base_url: str, api_key: str, async_client: httpx.AsyncClient | None = None) -> None:
         self.base_url = validate_gateway_base_url(base_url)
         self.api_key = api_key
+        self.async_client = async_client
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
+    @asynccontextmanager
+    async def _client(self) -> AsyncIterator[httpx.AsyncClient]:
+        if self.async_client is not None:
+            yield self.async_client
+            return
+        async with build_gateway_async_client() as client:
+            yield client
+
     async def list_models(self, models_endpoint: str = "/v1/models") -> list[dict[str, Any]]:
         endpoint = models_endpoint if models_endpoint.startswith("/") else f"/{models_endpoint}"
         url = f"{self.base_url}{endpoint}"
-        async with httpx.AsyncClient(
-            timeout=_gateway_timeout(),
-            follow_redirects=False,
-        ) as client:
+        async with self._client() as client:
             try:
                 response = await client.get(url, headers=self._headers())
             except httpx.HTTPError as exc:
@@ -77,10 +97,7 @@ class GatewayClient:
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
-        async with httpx.AsyncClient(
-            timeout=_gateway_timeout(),
-            follow_redirects=False,
-        ) as client:
+        async with self._client() as client:
             try:
                 response = await client.post(url, headers=self._headers(), json=payload)
             except httpx.HTTPError as exc:
@@ -131,10 +148,7 @@ class GatewayClient:
         buffer = ""
         chunk_count = 0
         started = time.monotonic()
-        async with httpx.AsyncClient(
-            timeout=_gateway_timeout(),
-            follow_redirects=False,
-        ) as client:
+        async with self._client() as client:
             try:
                 async with client.stream("POST", url, headers=self._headers(), json=payload) as response:
                     if response.status_code == 401:
@@ -195,10 +209,7 @@ class GatewayClient:
             "quality": quality,
             "response_format": "url",
         }
-        async with httpx.AsyncClient(
-            timeout=_gateway_timeout(),
-            follow_redirects=False,
-        ) as client:
+        async with self._client() as client:
             try:
                 response = await client.post(url, headers=self._headers(), json=payload)
             except httpx.HTTPError as exc:

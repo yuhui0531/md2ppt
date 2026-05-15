@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_STORAGE_DIR = Path(__file__).resolve().parent / "storage"
@@ -13,6 +14,13 @@ class Settings(BaseSettings):
     allow_local_gateway_urls: bool = False
     gateway_timeout_seconds: float = 600.0
     max_gateway_response_bytes: int = 4_000_000
+    image_generation_concurrency: int = Field(default=4, ge=1)
+    image_progress_flush_interval_seconds: float = Field(default=1.0, ge=0.0)
+    text_cap_brief: int = Field(default=3072, ge=1)
+    text_cap_source_slide_constraint: int = Field(default=512, ge=1)
+    text_cap_slide_count: int = Field(default=1024, ge=1)
+    text_cap_style_guide: int = Field(default=2048, ge=1)
+    text_cap_consistency: int = Field(default=4096, ge=1)
 
     # ---- SSO ----
     sso_verify_url: str = "http://127.0.0.1:9000/api/sso/verify"

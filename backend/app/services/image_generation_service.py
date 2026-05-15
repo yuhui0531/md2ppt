@@ -1,17 +1,23 @@
 import asyncio
+import time
 
+import httpx
 from fastapi import HTTPException
 from loguru import logger
 from sqlmodel import Session, select
 
-from app.core.gateway_client import GatewayClient, GatewayError
+from app.config import settings
+from app.core.gateway_client import (
+    GatewayClient,
+    GatewayError,
+    build_gateway_async_client,
+    gateway_timeout,
+)
 from app.core.image_storage import save_data_uri
 from app.models.job import JobRecord
 from app.models.model_config import ModelConfigRecord
 from app.services.job_service import JobService
 from app.services.project_service import ProjectService
-
-MAX_CONCURRENCY = 3
 
 
 def _failed_pages_error(failed_pages: list[int]) -> str:
@@ -67,54 +73,67 @@ class ImageGenerationService:
         )
         completed = 0
         failed_pages: list[int] = []
-        semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+        slide_indexes = {slide.slide_no: index for index, slide in enumerate(data.slides)}
+        semaphore = asyncio.Semaphore(settings.image_generation_concurrency)
+        flush_interval = settings.image_progress_flush_interval_seconds
+        flush_state = {"last_flush_at": 0.0, "last_completed": -1}
 
-        async def generate_one(slide_index: int, slide_no: int, prompt: str) -> None:
-            nonlocal completed
-            async with semaphore:
-                client = GatewayClient(config.base_url, config.api_key_encrypted)
-                try:
-                    image_url = await client.image_generation(
-                        model=config.selected_model,
-                        prompt=prompt,
-                        size=config.image_size or "2048x1152",
-                        quality=config.image_quality or "hd",
-                    )
-                    # 网关常常以 data:image/png;base64,... 形式返回（即便我们要求 url）。
-                    # 这里立刻落盘换成 `/api/images/...` 短路径，避免把 ~3MB base64
-                    # 文本反复写进 projectrecord.data_json。落盘失败就回退到原值。
-                    saved = save_data_uri(project_id, slide_no, image_url)
-                    data.slides[slide_index].image_url = saved or image_url
-                except (ValueError, GatewayError) as exc:
-                    failed_pages.append(slide_no)
-                    logger.warning(
-                        "[image-gen] slide failed job_id={} project_id={} slide_no={} error={}",
-                        job.id,
-                        project_id,
-                        slide_no,
-                        exc,
-                    )
+        def flush_progress(force: bool = False) -> None:
+            now = time.monotonic()
+            if force and flush_state["last_completed"] == completed:
+                return
+            if not force and completed < total and now - flush_state["last_flush_at"] < flush_interval:
+                return
+            self.project_service.save_project_data(data)
+            job_service.update(
+                job,
+                stage="generating",
+                progress=completed / total,
+                message=f"已完成 {completed}/{total} 张",
+                status="running",
+            )
+            flush_state["last_flush_at"] = now
+            flush_state["last_completed"] = completed
 
-                completed += 1
-                # 每完成一页就落一次盘，中途失败时也尽量保住已经生成好的图片结果。
-                self.project_service.save_project_data(data)
-                job_service.update(
-                    job,
-                    stage="generating",
-                    progress=completed / total,
-                    message=f"已完成 {completed}/{total} 张",
-                    status="running",
-                )
+        async with build_gateway_async_client() as async_client:
+            client = GatewayClient(config.base_url, config.api_key_encrypted, async_client=async_client)
 
-        tasks = []
-        for slide in target_slides:
-            idx = next(i for i, s in enumerate(data.slides) if s.slide_no == slide.slide_no)
-            prompt = slide.prompt or f"slide {slide.slide_no}"
-            if extra_prompt:
-                prompt = f"{prompt}\n\n{extra_prompt}"
-            tasks.append(generate_one(idx, slide.slide_no, prompt))
+            async def generate_one(slide_index: int, slide_no: int, prompt: str) -> None:
+                nonlocal completed
+                async with semaphore:
+                    try:
+                        image_url = await client.image_generation(
+                            model=config.selected_model,
+                            prompt=prompt,
+                            size=config.image_size or "2048x1152",
+                            quality=config.image_quality or "hd",
+                        )
+                        saved = save_data_uri(project_id, slide_no, image_url)
+                        data.slides[slide_index].image_url = saved or image_url
+                    except (ValueError, GatewayError) as exc:
+                        failed_pages.append(slide_no)
+                        logger.warning(
+                            "[image-gen] slide failed job_id={} project_id={} slide_no={} error={}",
+                            job.id,
+                            project_id,
+                            slide_no,
+                            exc,
+                        )
 
-        await asyncio.gather(*tasks)
+                    completed += 1
+                    flush_progress(force=False)
+
+            tasks = []
+            for slide in target_slides:
+                idx = slide_indexes[slide.slide_no]
+                prompt = slide.prompt or f"slide {slide.slide_no}"
+                if extra_prompt:
+                    prompt = f"{prompt}\n\n{extra_prompt}"
+                tasks.append(generate_one(idx, slide.slide_no, prompt))
+
+            await asyncio.gather(*tasks)
+
+        flush_progress(force=True)
 
         if failed_pages:
             error_msg = _failed_pages_error(failed_pages)
