@@ -78,13 +78,13 @@ export function UploadPage() {
 
   const handleUpload = (file: File) => {
     setFilename(file.name);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setContent(e.target?.result as string);
+    file.text().then((text) => {
+      setContent(text);
       message.success(`${file.name} 解析成功`);
-    };
-    reader.readAsText(file);
-    return false; // Prevent auto upload
+    }).catch(() => {
+      message.error(`${file.name} 读取失败`);
+    });
+    return false;
   };
 
   return (
