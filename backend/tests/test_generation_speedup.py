@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import Settings  # noqa: E402
+from app.core.prompts.consistency import CONSISTENCY_PROMPT  # noqa: E402
 from app.models.schemas import (  # noqa: E402
     ConsistencyReport,
     ConsistencySlideReport,
@@ -168,6 +169,11 @@ class GenerationServiceSpeedupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(GenerationService._effective_max_tokens("内容理解摘要", None), 3072)
         self.assertEqual(GenerationService._effective_max_tokens("大纲生成", None), 81920)
 
+    def test_consistency_prompt_requires_string_suggested_fix(self) -> None:
+        self.assertIn("suggested_fix 必须是单个简短字符串", CONSISTENCY_PROMPT)
+        self.assertIn("无建议时返回空字符串", CONSISTENCY_PROMPT)
+        self.assertIn("不要返回数组或对象", CONSISTENCY_PROMPT)
+
     async def test_regenerate_outline_reuses_one_shared_async_client(self) -> None:
         data = ProjectData(
             project_id="proj_outline",
@@ -249,6 +255,42 @@ class GenerationServiceSpeedupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data.slides[0].prompt, "new")
         self.assertTrue(all(client is not None for client in seen_clients))
         self.assertEqual(len({id(client) for client in seen_clients}), 1)
+
+    async def test_check_consistency_normalizes_list_suggested_fix(self) -> None:
+        data = ProjectData(
+            project_id="proj_consistency_normalize",
+            source={"filename": "demo.md", "language": "zh-CN"},
+            generation_options=GenerationOptions(),
+            style_guide=StyleGuide(visual_style="clean"),
+            slides=[Slide(slide_no=1, title="A", page_type="cover", prompt="p")],
+            generation_state="prompts_generated",
+        )
+        service = GenerationService(session=object(), user_id=1)
+
+        async def fake_call_json(_stage, _task_prompt, _payload, on_partial=None, async_client=None):
+            return {
+                "overall_score": 0.8,
+                "threshold": 0.85,
+                "slides": [
+                    {
+                        "slide_no": 1,
+                        "score": 0.7,
+                        "issues": ["配色不统一"],
+                        "revision_needed": True,
+                        "suggested_fix": ["统一主色", "减少装饰元素"],
+                    }
+                ],
+            }
+
+        service._call_json = fake_call_json
+
+        report = await service.check_consistency(data)
+
+        self.assertEqual(report.overall_score, 0.8)
+        self.assertEqual(report.slides[0].suggested_fix, "统一主色；减少装饰元素")
+        self.assertEqual(data.slides[0].style_consistency_score, 0.7)
+        self.assertEqual(data.slides[0].style_issues, ["配色不统一"])
+        self.assertTrue(data.slides[0].revision_needed)
 
     async def test_check_consistency_for_project_reuses_one_shared_async_client(self) -> None:
         data = ProjectData(

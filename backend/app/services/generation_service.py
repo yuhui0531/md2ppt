@@ -386,7 +386,7 @@ class GenerationService:
             },
             async_client=async_client,
         )
-        report = self._validate_model(ConsistencyReport, self._normalize_payload(payload), "风格一致性检查")
+        report = self._validate_model(ConsistencyReport, self._normalize_consistency_report(payload), "风格一致性检查")
         for slide in data.slides:
             slide_report = next((item for item in report.slides if item.slide_no == slide.slide_no), None)
             if slide_report:
@@ -546,6 +546,24 @@ class GenerationService:
         normalized["kind"] = GenerationService._text_field(normalized.get("kind")).lower() or "none"
         normalized["evidence"] = GenerationService._text_field(normalized.get("evidence"))
         normalized["reason"] = GenerationService._text_field(normalized.get("reason"))
+        return normalized
+
+    @staticmethod
+    def _normalize_consistency_report(payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = GenerationService._normalize_payload(payload)
+        slides: list[Any] = []
+        for item in GenerationService._list_field(normalized.get("slides")):
+            if not isinstance(item, dict):
+                slides.append(item)
+                continue
+            slide = dict(item)
+            slide["issues"] = GenerationService._string_list(
+                GenerationService._list_field(slide.get("issues")),
+                ("issue", "description", "text", "value"),
+            )
+            slide["suggested_fix"] = GenerationService._text_field(slide.get("suggested_fix"))
+            slides.append(slide)
+        normalized["slides"] = slides
         return normalized
 
     @staticmethod

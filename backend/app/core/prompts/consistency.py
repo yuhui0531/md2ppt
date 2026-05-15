@@ -1,1 +1,1 @@
-CONSISTENCY_PROMPT = """任务：检查 prompt 风格一致性。\n输出字段：overall_score, threshold, slides；每页包含 slide_no, score, issues, revision_needed, suggested_fix。\n规则：按 style guide 检查色彩、版式、图标、字体感、视觉复杂度、材质、背景、构图是否偏离；issues 和 suggested_fix 用短项，不写长段评语。"""
+CONSISTENCY_PROMPT = """任务：检查 prompt 风格一致性。\n输出字段：overall_score, threshold, slides；每页包含 slide_no, score, issues, revision_needed, suggested_fix。\n规则：按 style guide 检查色彩、版式、图标、字体感、视觉复杂度、材质、背景、构图是否偏离；issues 必须是字符串数组，每项一个短项，不写长段评语；suggested_fix 必须是单个简短字符串，无建议时返回空字符串，不要返回数组或对象。"""
