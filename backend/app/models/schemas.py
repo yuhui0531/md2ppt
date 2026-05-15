@@ -188,6 +188,30 @@ class DeckBrief(BaseModel):
     source_refs: list[str] = Field(default_factory=list)
 
 
+class SourceSlideCountConstraint(BaseModel):
+    kind: Literal["none", "fixed", "range"] = "none"
+    fixed_count: int | None = Field(default=None, ge=1)
+    min_count: int | None = Field(default=None, ge=1)
+    max_count: int | None = Field(default=None, ge=1)
+    evidence: str = ""
+    reason: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> "SourceSlideCountConstraint":
+        if self.kind == "none":
+            return self
+        if self.kind == "fixed":
+            if self.fixed_count is None:
+                raise ValueError("fixed 类型必须提供 fixed_count")
+            return self
+        if self.min_count is None or self.max_count is None:
+            raise ValueError("range 类型必须提供 min_count 和 max_count")
+        if self.max_count < self.min_count:
+            raise ValueError("range 类型的 max_count 不能小于 min_count")
+        return self
+
+
 class SlideCountPlan(BaseModel):
     mode: str = "auto"
     recommended_slide_count: int = 0
@@ -251,6 +275,7 @@ class ProjectData(BaseModel):
     generation_options: GenerationOptions
     parsed_sections: list[ParsedSection] = Field(default_factory=list)
     deck_brief: DeckBrief | None = None
+    source_slide_count_constraint: SourceSlideCountConstraint | None = None
     slide_count_plan: SlideCountPlan | None = None
     template: dict[str, Any] = Field(default_factory=dict)
     style_guide: StyleGuide | None = None
