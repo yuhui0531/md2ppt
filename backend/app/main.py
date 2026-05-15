@@ -1,4 +1,5 @@
 import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -20,16 +21,19 @@ from app.models.db import init_db
 setup_logging()
 
 
+_POLLING_ACCESS_PATTERNS = (
+    re.compile(r'"GET /api/jobs/[^/\s"]+ HTTP/1\.1" 200'),
+    re.compile(r'"GET /api/projects/[^/\s"]+ HTTP/1\.1" 200'),
+)
+
+
 class SuppressJobPollingAccessLogs(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             message = record.getMessage()
         except Exception:
             return True
-        return not (
-            '"GET /api/jobs/' in message
-            and 'HTTP/1.1" 200' in message
-        )
+        return not any(pattern.search(message) for pattern in _POLLING_ACCESS_PATTERNS)
 
 
 logging.getLogger("uvicorn.access").addFilter(SuppressJobPollingAccessLogs())

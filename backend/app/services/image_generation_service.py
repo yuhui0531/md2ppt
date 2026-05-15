@@ -14,6 +14,11 @@ from app.services.project_service import ProjectService
 MAX_CONCURRENCY = 3
 
 
+def _failed_pages_error(failed_pages: list[int]) -> str:
+    # 前端会从这个固定格式里提取失败页号，驱动“仅重试失败页”操作。
+    return f"以下页面生图失败：{sorted(failed_pages)}"
+
+
 class ImageGenerationService:
     def __init__(self, session: Session, user_id: int) -> None:
         self.session = session
@@ -112,7 +117,7 @@ class ImageGenerationService:
         await asyncio.gather(*tasks)
 
         if failed_pages:
-            error_msg = f"以下页面生图失败：{failed_pages}"
+            error_msg = _failed_pages_error(failed_pages)
             succeeded = total - len(failed_pages)
             if succeeded == 0:
                 logger.warning("[image-gen] batch failed job_id={} project_id={} total={} failed_pages={}", job.id, project_id, total, failed_pages)

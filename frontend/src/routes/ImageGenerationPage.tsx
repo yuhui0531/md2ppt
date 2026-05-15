@@ -15,6 +15,19 @@ import { PictureOutlined, DownloadOutlined, LeftOutlined, SyncOutlined, EyeOutli
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
+const PROJECT_REFRESH_EVERY_POLLS = 4;
+
+function extractFailedSlideNumbers(job: JobResponse | null): number[] {
+  if (!job || job.kind !== 'image_generation') return [];
+  if (job.status !== 'completed' && job.status !== 'failed') return [];
+  if (!job.error) return [];
+  const match = job.error.match(/以下页面生图失败：\s*\[([^\]]+)\]/);
+  if (!match) return [];
+  return match[1]
+    .split(',')
+    .map((part) => Number(part.trim()))
+    .filter((value) => Number.isInteger(value) && value > 0);
+}
 
 export function ImageGenerationPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -36,6 +49,14 @@ export function ImageGenerationPage() {
     activeProjectIdRef.current = projectId;
   }, [projectId]);
   const stillScoped = (startedFor: string) => activeProjectIdRef.current === startedFor;
+
+  async function refreshProjectIfNeeded(startedFor: string, force = false): Promise<void> {
+    if (!projectId) return;
+    if (!force && !stillScoped(startedFor)) return;
+    const updated = await getProject(startedFor);
+    if (!stillScoped(startedFor)) return;
+    setProject(updated);
+  }
 
   useEffect(() => {
     if (!projectId) return;
@@ -64,18 +85,20 @@ export function ImageGenerationPage() {
         // 在 PPT 生成跑完前保持 disabled；进度条则只在 image_generation 时显示。
         setJob(active);
         setBusy(true);
+        let pollCount = 0;
         while (!cancelled) {
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
           if (cancelled) return;
           const latest = await getJob(active.job_id);
           if (cancelled) return;
           setJob(latest);
-          // 只在我们真的在跑生图任务时去拉项目数据（图片 URL 增量更新）。
-          // 别的类型的任务对生图页 UI 没影响，省一次 GET。
+          // 只在我们真的在跑生图任务时低频拉项目数据；终态再强制刷新一次。
           if (latest.kind === 'image_generation') {
-            const updated = await getProject(projectId);
-            if (cancelled) return;
-            setProject(updated);
+            pollCount += 1;
+            if (latest.status !== 'running' || pollCount % PROJECT_REFRESH_EVERY_POLLS === 0) {
+              await refreshProjectIfNeeded(projectId, true);
+              if (cancelled) return;
+            }
           }
           if (latest.status === 'completed') {
             if (latest.kind === 'image_generation') {
@@ -139,6 +162,38 @@ export function ImageGenerationPage() {
     }
   }
 
+  async function handleRetryFailedSlides() {
+    if (!project) return;
+    const failedSlideNumbers = extractFailedSlideNumbers(displayJob ?? job);
+    if (!failedSlideNumbers.length) return;
+    const startedFor = project.project_id;
+    setBusy(true);
+    const baselineUrls = new Map(project.slides.map((s) => [s.slide_no, s.image_url ?? null]));
+    setGeneratingSlides(failedSlideNumbers);
+    setMessage(null);
+    setJob(null);
+    try {
+      const createdJob = await generateImages(startedFor, { slide_numbers: failedSlideNumbers });
+      if (!stillScoped(startedFor)) return;
+      setJob(createdJob);
+      const finalJob = await pollAndRefresh(createdJob.job_id, baselineUrls, startedFor);
+      if (!stillScoped(startedFor)) return;
+      if (finalJob.error) {
+        setMessage({ kind: 'error', text: `失败页重试后仍有失败：${finalJob.error}` });
+      } else {
+        setMessage({ kind: 'success', text: '失败页重试完成' });
+      }
+    } catch (error) {
+      if (!stillScoped(startedFor)) return;
+      setMessage({ kind: 'error', text: error instanceof Error ? error.message : '失败页重试失败' });
+    } finally {
+      if (stillScoped(startedFor)) {
+        setBusy(false);
+        setGeneratingSlides([]);
+      }
+    }
+  }
+
   async function handleRetrySlide(slideNo: number) {
     if (!project) return;
     const startedFor = project.project_id;
@@ -192,6 +247,7 @@ export function ImageGenerationPage() {
   }
 
   async function pollAndRefresh(jobId: string, baselineUrls: Map<number, string | null>, startedFor: string): Promise<JobResponse> {
+    let pollCount = 0;
     while (true) {
       await new Promise((resolve) => window.setTimeout(resolve, 2000));
       const latest = await getJob(jobId);
@@ -204,22 +260,28 @@ export function ImageGenerationPage() {
         continue;
       }
       setJob(latest);
-      if (project) {
-        const updated = await getProject(project.project_id);
-        if (!stillScoped(startedFor)) {
-          if (latest.status === 'completed') return latest;
-          if (latest.status === 'failed') throw new Error(latest.error || '生图失败');
-          if (latest.status === 'cancelled') throw new Error('任务已取消');
-          continue;
+      if (latest.kind === 'image_generation') {
+        pollCount += 1;
+        const shouldRefreshProject = latest.status !== 'running' || pollCount % PROJECT_REFRESH_EVERY_POLLS === 0;
+        if (shouldRefreshProject) {
+          await refreshProjectIfNeeded(startedFor, true);
+          if (!stillScoped(startedFor)) {
+            if (latest.status === 'completed') return latest;
+            if (latest.status === 'failed') throw new Error(latest.error || '生图失败');
+            if (latest.status === 'cancelled') throw new Error('任务已取消');
+            continue;
+          }
+          const currentProject = useProjectStore.getState().project;
+          if (currentProject?.project_id === startedFor) {
+            setGeneratingSlides((prev) => prev.filter((slideNo) => {
+              const updatedSlide = currentProject.slides.find((s) => s.slide_no === slideNo);
+              if (!updatedSlide) return false;
+              const baseline = baselineUrls.get(slideNo) ?? null;
+              const current = updatedSlide.image_url ?? null;
+              return current === baseline;
+            }));
+          }
         }
-        setProject(updated);
-        setGeneratingSlides((prev) => prev.filter((slideNo) => {
-          const updatedSlide = updated.slides.find((s) => s.slide_no === slideNo);
-          if (!updatedSlide) return false;
-          const baseline = baselineUrls.get(slideNo) ?? null;
-          const current = updatedSlide.image_url ?? null;
-          return current === baseline;
-        }));
       }
       if (latest.status === 'completed') return latest;
       if (latest.status === 'failed') throw new Error(latest.error || '生图失败');
@@ -234,6 +296,8 @@ export function ImageGenerationPage() {
   const hasAnyPrompt = project.slides.some((s) => s.prompt);
   // 只展示生图任务的进度条；PPT 生成任务的进度由工作台负责显示。
   const displayJob = job?.kind === 'image_generation' ? job : null;
+  const failedSlideNumbers = extractFailedSlideNumbers(displayJob ?? job);
+  const canRetryFailedSlides = !busy && failedSlideNumbers.length > 0;
 
   const galleryImages: GalleryImage[] = project.slides
     .filter((s) => s.image_url)
@@ -250,6 +314,9 @@ export function ImageGenerationPage() {
           <Space wrap>
             <Button type="primary" icon={<PictureOutlined />} onClick={handleGenerateAll} disabled={busy || !hasAnyPrompt} loading={busy && generatingSlides.length > 1}>
               {busy && !displayJob ? '任务执行中…' : (project.slides.some((s) => s.image_url) ? '重新批量生成' : '开始批量生图')}
+            </Button>
+            <Button icon={<SyncOutlined />} onClick={handleRetryFailedSlides} disabled={!canRetryFailedSlides}>
+              仅重试失败页
             </Button>
             <Button icon={<DownloadOutlined />} onClick={handleExportPptx} disabled={busy || !project.slides.some((s) => s.image_url)}>
               下载 PPT
