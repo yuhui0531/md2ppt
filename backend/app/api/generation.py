@@ -1,8 +1,5 @@
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session
-
 from app.core.auth import get_current_user_id
 from app.models.db import engine, get_session
 from app.models.job import JobRecord
@@ -21,6 +18,9 @@ from app.services.generation_service import GenerationService
 from app.services.image_generation_service import ImageGenerationService
 from app.services.job_service import JobService
 from app.services.project_service import ProjectService
+from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger
+from sqlmodel import Session
 
 router = APIRouter(tags=["generation"])
 
@@ -49,8 +49,10 @@ async def generate_project(
     _assert_project_owner(session, project_id, user_id)
     job_service = JobService(session)
     if job_service.has_active_job(project_id):
+        logger.warning("[generation-job] create rejected project_id={} user_id={} reason=active_job", project_id, user_id)
         raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
     job = job_service.create_job(project_id, kind="generation")
+    logger.info("[generation-job] created job_id={} project_id={} user_id={} mode={}", job.id, project_id, user_id, request.mode)
     job_service.update(job, stage="queued", progress=0.02, message="生成任务已创建", status="running")
     asyncio.create_task(_run_generation_job(job.id, project_id, request.mode, user_id))
     return JobResponse(
@@ -77,13 +79,31 @@ async def _run_generation_job(job_id: str, project_id: str, mode: str, user_id: 
                 job_service.update(job, stage="consistency_checked", progress=1.0, message="生成完成", status="completed")
         except HTTPException as exc:
             if exc.status_code == 499:
+                logger.info("[generation-job] cancelled job_id={} project_id={} user_id={}", job_id, project_id, user_id)
                 session.refresh(job)
                 if job.status != "cancelled":
                     job_service.update(job, stage="cancelled", progress=job.progress, message="任务已取消", status="cancelled")
                 return
             detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            logger.exception(
+                "[generation-job] failed job_id={} project_id={} user_id={} stage={} status_code={} detail={}",
+                job_id,
+                project_id,
+                user_id,
+                job.stage,
+                exc.status_code,
+                detail,
+            )
             job_service.update(job, stage="failed", progress=job.progress, message="生成失败", status="failed", error=detail)
         except Exception as exc:
+            logger.exception(
+                "[generation-job] failed job_id={} project_id={} user_id={} stage={} error={}",
+                job_id,
+                project_id,
+                user_id,
+                job.stage,
+                exc,
+            )
             job_service.update(job, stage="failed", progress=job.progress, message="生成失败", status="failed", error=str(exc))
 
 
@@ -206,8 +226,17 @@ async def generate_images(
     ImageGenerationService(session, user_id).get_image_config()
     job_service = JobService(session)
     if job_service.has_active_job(project_id):
+        logger.warning("[image-job] create rejected project_id={} user_id={} reason=active_job", project_id, user_id)
         raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
     job = job_service.create_job(project_id, kind="image_generation")
+    logger.info(
+        "[image-job] created job_id={} project_id={} user_id={} slide_numbers={} extra_prompt_present={}",
+        job.id,
+        project_id,
+        user_id,
+        request.slide_numbers,
+        bool(request.extra_prompt),
+    )
     job_service.update(job, stage="queued", progress=0.0, message="批量生图任务已创建", status="running")
     asyncio.create_task(_run_image_generation_job(job.id, project_id, request.slide_numbers, request.extra_prompt, user_id))
     return JobResponse(
@@ -233,4 +262,12 @@ async def _run_image_generation_job(job_id: str, project_id: str, slide_numbers:
                 project_id, slide_numbers, job_service, job, extra_prompt=extra_prompt
             )
         except Exception as exc:
+            logger.exception(
+                "[image-job] failed job_id={} project_id={} user_id={} stage={} error={}",
+                job_id,
+                project_id,
+                user_id,
+                job.stage,
+                exc,
+            )
             job_service.update(job, stage="failed", progress=job.progress, message=str(exc), status="failed", error=str(exc))

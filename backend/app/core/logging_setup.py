@@ -10,10 +10,12 @@ _SSO_TOKEN_PATTERN = re.compile(r"(ssoToken=)[^&\"\s]+")
 
 
 def _redact(message: str) -> str:
+    # 这里只是兜底脱敏，业务侧仍应从源头避免把敏感字段写进日志。
     return _SSO_TOKEN_PATTERN.sub(r"\1REDACTED", message)
 
 
 class InterceptHandler(logging.Handler):
+    # 把 uvicorn/httpx/sqlalchemy 等 stdlib logger 统一转进 Loguru 输出。
     def emit(self, record: logging.LogRecord) -> None:
         try:
             level = logger.level(record.levelname).name

@@ -54,7 +54,7 @@ async def sso_login(request: Request, ssoToken: str | None = None) -> RedirectRe
     user_agent = request.headers.get("user-agent")
     token_preview = (ssoToken[:8] + "...") if ssoToken else None
     logger.info(
-        "sso login received ip={} origin={} referer={} ua={} ssoToken_present={} ssoToken_preview={}",
+        "[sso] login received ip={} origin={} referer={} ua={} ssoToken_present={} ssoToken_preview={}",
         client_ip,
         origin,
         referer,
@@ -66,10 +66,10 @@ async def sso_login(request: Request, ssoToken: str | None = None) -> RedirectRe
     # ① 已登录短路
     existing = decode_token(request.cookies.get(settings.jwt_cookie_name))
     if existing:
-        logger.info("sso login short-circuited (already logged in) user_id={} ip={}", existing.user_id, client_ip)
+        logger.info("[sso] login short-circuited user_id={} ip={}", existing.user_id, client_ip)
         return _home_redirect()
 
-    # ② Login CSRF 兜底
+    # Login CSRF 兜底默认关闭，避免和第三方 SSO 跳转链路冲突；需要时再按可信来源放开。
     # if not _is_trusted_origin(request):
     #     logger.warning(
     #         "sso login rejected UNTRUSTED_ORIGIN ip={} origin={} referer={} trusted={}",
@@ -84,7 +84,7 @@ async def sso_login(request: Request, ssoToken: str | None = None) -> RedirectRe
         user_id = await verify_sso_token(ssoToken or "")
     except SsoError as exc:
         logger.warning(
-            "sso login failed ip={} code={} message={} ssoToken_preview={}",
+            "[sso] login failed ip={} code={} message={} ssoToken_preview={}",
             client_ip,
             exc.code,
             exc.message,
@@ -94,7 +94,7 @@ async def sso_login(request: Request, ssoToken: str | None = None) -> RedirectRe
 
     token = issue_token(user_id)
     logger.info(
-        "sso login success user_id={} ip={} jwt_ttl={}s cookie_secure={}",
+        "[sso] login success user_id={} ip={} jwt_ttl={}s cookie_secure={}",
         user_id,
         client_ip,
         settings.jwt_ttl_seconds,
@@ -118,9 +118,9 @@ def whoami(request: Request) -> dict:
     raw = request.cookies.get(settings.jwt_cookie_name)
     identity = decode_token(raw)
     if not identity:
-        logger.info("whoami unauthenticated cookie_present={}", bool(raw))
+        logger.info("[sso] whoami unauthenticated cookie_present={}", bool(raw))
         raise HTTPException(status_code=401, detail="未登录或登录已过期")
-    logger.debug("whoami ok user_id={}", identity.user_id)
+    logger.debug("[sso] whoami ok user_id={}", identity.user_id)
     return {"user_id": identity.user_id}
 
 
@@ -129,7 +129,7 @@ def sso_logout(request: Request) -> JSONResponse:
     raw = request.cookies.get(settings.jwt_cookie_name)
     identity = decode_token(raw) if raw else None
     logger.info(
-        "sso logout user_id={} cookie_present={}",
+        "[sso] logout user_id={} cookie_present={}",
         identity.user_id if identity else None,
         bool(raw),
     )

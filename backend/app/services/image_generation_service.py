@@ -8,7 +8,6 @@ from app.core.gateway_client import GatewayClient, GatewayError
 from app.core.image_storage import save_data_uri
 from app.models.job import JobRecord
 from app.models.model_config import ModelConfigRecord
-from app.models.schemas import ProjectData
 from app.services.job_service import JobService
 from app.services.project_service import ProjectService
 
@@ -53,6 +52,14 @@ class ImageGenerationService:
             return
 
         total = len(target_slides)
+        logger.info(
+            "[image-gen] batch start job_id={} project_id={} total={} model={} extra_prompt_present={}",
+            job.id,
+            project_id,
+            total,
+            config.selected_model,
+            bool(extra_prompt),
+        )
         completed = 0
         failed_pages: list[int] = []
         semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -75,9 +82,16 @@ class ImageGenerationService:
                     data.slides[slide_index].image_url = saved or image_url
                 except (ValueError, GatewayError) as exc:
                     failed_pages.append(slide_no)
-                    logger.warning("[image-gen] slide {} failed: {}", slide_no, exc)
+                    logger.warning(
+                        "[image-gen] slide failed job_id={} project_id={} slide_no={} error={}",
+                        job.id,
+                        project_id,
+                        slide_no,
+                        exc,
+                    )
 
                 completed += 1
+                # 每完成一页就落一次盘，中途失败时也尽量保住已经生成好的图片结果。
                 self.project_service.save_project_data(data)
                 job_service.update(
                     job,
@@ -101,6 +115,7 @@ class ImageGenerationService:
             error_msg = f"以下页面生图失败：{failed_pages}"
             succeeded = total - len(failed_pages)
             if succeeded == 0:
+                logger.warning("[image-gen] batch failed job_id={} project_id={} total={} failed_pages={}", job.id, project_id, total, failed_pages)
                 job_service.update(
                     job,
                     stage="failed",
@@ -110,6 +125,14 @@ class ImageGenerationService:
                     error=error_msg,
                 )
             else:
+                logger.warning(
+                    "[image-gen] batch partial job_id={} project_id={} succeeded={} total={} failed_pages={}",
+                    job.id,
+                    project_id,
+                    succeeded,
+                    total,
+                    failed_pages,
+                )
                 job_service.update(
                     job,
                     stage="completed",
@@ -119,4 +142,5 @@ class ImageGenerationService:
                     error=error_msg,
                 )
         else:
+            logger.info("[image-gen] batch completed job_id={} project_id={} total={}", job.id, project_id, total)
             job_service.update(job, stage="completed", progress=1.0, message=f"全部 {total} 张生图完成", status="completed")

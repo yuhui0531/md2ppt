@@ -20,6 +20,7 @@ class JobService:
         self.session.add(job)
         self.session.commit()
         self.session.refresh(job)
+        logger.info("[job] created id={} project={} kind={} status={}", job.id, job.project_id, job.kind, job.status)
         return job
 
     def get_job(self, job_id: str) -> JobRecord:
@@ -54,6 +55,14 @@ class JobService:
         for job in self.session.exec(statement):
             elapsed = (now - ensure_utc(job.updated_at)).total_seconds()
             if elapsed > JOB_TIMEOUT_SECONDS:
+                logger.warning(
+                    "[job] timed out id={} project={} kind={} elapsed={:.1f}s timeout={}s",
+                    job.id,
+                    job.project_id,
+                    job.kind,
+                    elapsed,
+                    JOB_TIMEOUT_SECONDS,
+                )
                 job.status = "failed"
                 job.stage = "timeout"
                 job.message = "任务超时，已自动标记为失败"
@@ -71,7 +80,12 @@ class JobService:
             job.status = status
         job.error = error
         job.updated_at = datetime.now(timezone.utc)
-        logger.info(
+        # 运行中任务会高频刷新进度；普通 tick 降到 debug，避免长任务刷满主日志。
+        level = "DEBUG" if job.status == "running" else "INFO"
+        if job.status in {"failed"} or stage == "timeout":
+            level = "WARNING"
+        logger.log(
+            level,
             "[job] id={} project={} status={} stage={} progress={:.2f} message={} error={}",
             job.id, job.project_id, job.status, stage, progress, message, error or "",
         )
@@ -89,4 +103,5 @@ class JobService:
         self.session.add(job)
         self.session.commit()
         self.session.refresh(job)
+        logger.info("[job] cancelled id={} project={} kind={}", job.id, job.project_id, job.kind)
         return job
