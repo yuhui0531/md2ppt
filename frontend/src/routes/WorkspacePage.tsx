@@ -182,14 +182,16 @@ export function WorkspacePage() {
               </Button>
             )}
             {(() => {
-              const navDisabled = busy !== null || jobRunning;
               const hasImages = project.slides.some((s) => s.image_url);
+              const navDisabled = busy !== null || jobRunning;
+              const canOpenImagesWhileGenerating = hasImages && job?.kind === 'image_generation' && jobRunning;
+              const imagesNavDisabled = navDisabled && !canOpenImagesWhileGenerating;
               const imagesLabel = hasImages ? '查看图片' : '下一步：准备生图';
-              const imagesBtn = <Button type="primary" icon={<PictureOutlined />} disabled={navDisabled}>{imagesLabel}</Button>;
+              const imagesBtn = <Button type="primary" icon={<PictureOutlined />} disabled={imagesNavDisabled}>{imagesLabel}</Button>;
               const exportBtn = <Button icon={<ExportOutlined />} disabled={navDisabled}>批量导出提示词</Button>;
               return (
                 <>
-                  {navDisabled ? imagesBtn : <Link to={`/workspace/${project.project_id}/images`}>{imagesBtn}</Link>}
+                  {imagesNavDisabled ? imagesBtn : <Link to={`/workspace/${project.project_id}/images`}>{imagesBtn}</Link>}
                   {navDisabled ? exportBtn : <Link to={`/review/${project.project_id}`}>{exportBtn}</Link>}
                 </>
               );
