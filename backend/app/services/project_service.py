@@ -12,6 +12,7 @@ from app.models.job import JobRecord
 from app.models.project import ParsedSectionRecord, ProjectRecord
 from app.models.schemas import CreateProjectRequest, ParsedSection, ProjectData, ProjectSummary
 from app.services.markdown_parser import MarkdownParserService
+from app.services.template_service import TemplateService
 
 
 class ProjectService:
@@ -70,7 +71,7 @@ class ProjectService:
         record = self._get_owned_record(project_id, user_id)
         data = ProjectData.model_validate(json.loads(record.data_json))
         self._ensure_record_title(record, data)
-        return data
+        return self._with_enforced_style_guide(data)
 
     def list_projects(self, user_id: int) -> list[ProjectSummary]:
         if user_id <= 0:
@@ -110,6 +111,7 @@ class ProjectService:
         record = self.session.get(ProjectRecord, data.project_id)
         if not record:
             raise HTTPException(status_code=404, detail="项目不存在")
+        data = self._with_enforced_style_guide(data)
         self._ensure_record_title(record, data)
         record.generation_state = data.generation_state
         record.data_json = data.model_dump_json()
@@ -124,7 +126,7 @@ class ProjectService:
             raise HTTPException(status_code=404, detail="项目不存在")
         data = ProjectData.model_validate(json.loads(record.data_json))
         self._ensure_record_title(record, data)
-        return data
+        return self._with_enforced_style_guide(data)
 
     def rename_project(self, project_id: str, title: str, user_id: int) -> ProjectRecord:
         record = self._get_owned_record(project_id, user_id)
@@ -185,6 +187,12 @@ class ProjectService:
             record.updated_at = datetime.now(timezone.utc)
             self.session.add(record)
             self.session.commit()
+
+    @staticmethod
+    def _with_enforced_style_guide(data: ProjectData) -> ProjectData:
+        if data.style_guide is not None:
+            data.style_guide = TemplateService.enforce_style_guide_constraints(data.style_guide)
+        return data
 
     @staticmethod
     def _is_placeholder_title(title: str | None) -> bool:

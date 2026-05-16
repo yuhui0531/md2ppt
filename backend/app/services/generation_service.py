@@ -15,7 +15,6 @@ from app.core.gateway_client import (
     GatewayClient,
     GatewayError,
     build_gateway_async_client,
-    gateway_timeout,
 )
 from app.core.json_repair import loads_json_with_repair
 from app.core.prompts.brief import BRIEF_PROMPT
@@ -105,7 +104,8 @@ class GenerationService:
         self.project_service = ProjectService(session)
         self.template_service = TemplateService()
 
-    async def run_generation(self, project_id: str, mode: str = "auto", job_service: JobService | None = None, job: JobRecord | None = None) -> ProjectData:
+    async def run_generation(self, project_id: str, mode: str = "auto", job_service: JobService | None = None,
+                             job: JobRecord | None = None) -> ProjectData:
         data = self.project_service.get_project_data_internal(project_id)
         if mode == "restart":
             data = self._reset_generation(data)
@@ -153,7 +153,8 @@ class GenerationService:
 
             if start_state == "slide_count_recommended":
                 self._update_job(job_service, job, "outline_generating", 0.36, "正在让大模型生成 PPT 大纲")
-                data.slides = await self.generate_outline(data, job_service=job_service, job=job, async_client=async_client)
+                data.slides = await self.generate_outline(data, job_service=job_service, job=job,
+                                                          async_client=async_client)
                 data.style_guide = None
                 data.consistency_report = None
                 data.generation_state = "outline_generated"
@@ -172,7 +173,8 @@ class GenerationService:
 
             if start_state == "style_guide_generated":
                 self._update_job(job_service, job, "prompts_generating", 0.68, "正在让大模型生成逐页 PPT 生图提示词")
-                data.slides = await self.generate_slide_prompts(data, job_service=job_service, job=job, async_client=async_client)
+                data.slides = await self.generate_slide_prompts(data, job_service=job_service, job=job,
+                                                                async_client=async_client)
                 data.consistency_report = None
                 data.generation_state = "prompts_generated"
                 self.project_service.save_project_data(data)
@@ -186,11 +188,13 @@ class GenerationService:
                 self.project_service.save_project_data(data)
                 self._ensure_not_cancelled(job_service, job)
 
-        logger.info("[generation] job complete project_id={} final_state={} elapsed={:.1f}s", project_id, data.generation_state, time.monotonic() - started_at)
+        logger.info("[generation] job complete project_id={} final_state={} elapsed={:.1f}s", project_id,
+                    data.generation_state, time.monotonic() - started_at)
         self._update_job(job_service, job, "consistency_checked", 0.98, "生成结果已保存")
         return data
 
-    async def run_full_generation(self, project_id: str, job_service: JobService | None = None, job: JobRecord | None = None) -> ProjectData:
+    async def run_full_generation(self, project_id: str, job_service: JobService | None = None,
+                                  job: JobRecord | None = None) -> ProjectData:
         return await self.run_generation(project_id, mode="restart", job_service=job_service, job=job)
 
     async def regenerate_outline(self, project_id: str, options: GenerationOptions) -> ProjectData:
@@ -202,7 +206,8 @@ class GenerationService:
             if data.deck_brief is None:
                 data.deck_brief = await self.generate_brief(data, async_client=async_client)
             if data.source_slide_count_constraint is None:
-                data.source_slide_count_constraint = await self.extract_source_slide_count_constraint(data, async_client=async_client)
+                data.source_slide_count_constraint = await self.extract_source_slide_count_constraint(data,
+                                                                                                      async_client=async_client)
             data.slide_count_plan = await self.recommend_slide_count(data, async_client=async_client)
             data.slides = await self.generate_outline(data, async_client=async_client)
         data.style_guide = None
@@ -253,7 +258,8 @@ class GenerationService:
                 {
                     "style_guide": data.style_guide.model_dump(mode="json") if data.style_guide else None,
                     "consistency_report": data.consistency_report.model_dump(mode="json"),
-                    "slides": [slide.model_dump(mode="json") for slide in data.slides if slide.slide_no in inconsistent_numbers],
+                    "slides": [slide.model_dump(mode="json") for slide in data.slides if
+                               slide.slide_no in inconsistent_numbers],
                 },
                 async_client=async_client,
             )
@@ -274,7 +280,8 @@ class GenerationService:
         )
         return self._validate_model(DeckBrief, self._normalize_brief(payload), "内容理解摘要")
 
-    async def extract_source_slide_count_constraint(self, data: ProjectData, async_client: httpx.AsyncClient | None = None) -> SourceSlideCountConstraint:
+    async def extract_source_slide_count_constraint(self, data: ProjectData,
+                                                    async_client: httpx.AsyncClient | None = None) -> SourceSlideCountConstraint:
         record = self.session.get(ProjectRecord, data.project_id)
         if not record or not (record.source_content or "").strip():
             return SourceSlideCountConstraint(kind="none", reason="原始材料为空，无法识别页数约束", confidence=0.0)
@@ -296,7 +303,8 @@ class GenerationService:
         self._validate_source_slide_count_constraint(constraint)
         return constraint
 
-    async def recommend_slide_count(self, data: ProjectData, async_client: httpx.AsyncClient | None = None) -> SlideCountPlan:
+    async def recommend_slide_count(self, data: ProjectData,
+                                    async_client: httpx.AsyncClient | None = None) -> SlideCountPlan:
         payload = await self._call_json(
             "页数推荐",
             SLIDE_COUNT_PROMPT,
@@ -308,11 +316,11 @@ class GenerationService:
         return plan
 
     async def generate_outline(
-        self,
-        data: ProjectData,
-        job_service: JobService | None = None,
-        job: JobRecord | None = None,
-        async_client: httpx.AsyncClient | None = None,
+            self,
+            data: ProjectData,
+            job_service: JobService | None = None,
+            job: JobRecord | None = None,
+            async_client: httpx.AsyncClient | None = None,
     ) -> list[Slide]:
         expected = data.slide_count_plan.accepted_slide_count if data.slide_count_plan else None
         on_partial = self._make_slide_progress_callback(
@@ -338,22 +346,24 @@ class GenerationService:
             raise HTTPException(status_code=502, detail=f"模型生成的大纲页数为 {len(slides)}，不等于要求页数 {expected}")
         return slides
 
-    async def generate_style_guide(self, data: ProjectData, async_client: httpx.AsyncClient | None = None) -> StyleGuide:
+    async def generate_style_guide(self, data: ProjectData,
+                                   async_client: httpx.AsyncClient | None = None) -> StyleGuide:
         payload = await self._call_json(
             "视觉规范",
             STYLE_GUIDE_PROMPT,
             self._style_guide_payload(data),
             async_client=async_client,
         )
-        return self._validate_model(StyleGuide, self._normalize_style_guide(payload), "视觉规范")
+        style_guide = self._validate_model(StyleGuide, self._normalize_style_guide(payload), "视觉规范")
+        return self.template_service.enforce_style_guide_constraints(style_guide)
 
     async def generate_slide_prompts(
-        self,
-        data: ProjectData,
-        slide_numbers: list[int] | None = None,
-        job_service: JobService | None = None,
-        job: JobRecord | None = None,
-        async_client: httpx.AsyncClient | None = None,
+            self,
+            data: ProjectData,
+            slide_numbers: list[int] | None = None,
+            job_service: JobService | None = None,
+            job: JobRecord | None = None,
+            async_client: httpx.AsyncClient | None = None,
     ) -> list[Slide]:
         target_slides = [slide for slide in data.slides if not slide_numbers or slide.slide_no in slide_numbers]
         on_partial = self._make_slide_progress_callback(
@@ -374,7 +384,8 @@ class GenerationService:
             return [by_no.get(slide.slide_no, slide) for slide in data.slides]
         return generated
 
-    async def check_consistency(self, data: ProjectData, threshold: float | None = None, async_client: httpx.AsyncClient | None = None) -> ConsistencyReport:
+    async def check_consistency(self, data: ProjectData, threshold: float | None = None,
+                                async_client: httpx.AsyncClient | None = None) -> ConsistencyReport:
         threshold = threshold if threshold is not None else data.generation_options.consistency_threshold
         payload = await self._call_json(
             "风格一致性检查",
@@ -396,21 +407,22 @@ class GenerationService:
         return report
 
     @staticmethod
-    def _update_job(job_service: JobService | None, job: JobRecord | None, stage: str, progress: float, message: str) -> None:
+    def _update_job(job_service: JobService | None, job: JobRecord | None, stage: str, progress: float,
+                    message: str) -> None:
         if job_service and job:
             job_service.update(job, stage=stage, progress=progress, message=message, status="running")
 
     @classmethod
     def _make_slide_progress_callback(
-        cls,
-        job_service: JobService | None,
-        job: JobRecord | None,
-        *,
-        stage: str,
-        base: float,
-        span: float,
-        expected: int | None,
-        message_fn: Callable[[int, int | None], str],
+            cls,
+            job_service: JobService | None,
+            job: JobRecord | None,
+            *,
+            stage: str,
+            base: float,
+            span: float,
+            expected: int | None,
+            message_fn: Callable[[int, int | None], str],
     ) -> Callable[[str], None] | None:
         if job_service is None or job is None:
             return None
@@ -442,7 +454,8 @@ class GenerationService:
         data.generation_state = "parsed"
         return data
 
-    def _ensure_not_cancelled(self, job_service: JobService | None, job: JobRecord | None) -> None:
+    @staticmethod
+    def _ensure_not_cancelled(job_service: JobService | None, job: JobRecord | None) -> None:
         if not job_service or not job:
             return
         current = job_service.get_job(job.id)
@@ -477,21 +490,30 @@ class GenerationService:
     def _normalize_brief(payload: dict[str, Any]) -> dict[str, Any]:
         normalized = GenerationService._normalize_payload(payload)
         normalized["narrative"] = GenerationService._text_field(normalized.get("narrative"))
-        normalized["main_issues"] = GenerationService._string_list(normalized.get("main_issues", []), ("issue", "description"))
-        normalized["key_arguments"] = GenerationService._string_list(normalized.get("key_arguments", []), ("argument", "description"))
+        normalized["main_issues"] = GenerationService._string_list(normalized.get("main_issues", []),
+                                                                   ("issue", "description"))
+        normalized["key_arguments"] = GenerationService._string_list(normalized.get("key_arguments", []),
+                                                                     ("argument", "description"))
         normalized["risks"] = GenerationService._string_list(normalized.get("risks", []), ("risk", "description"))
-        normalized["recommendations"] = GenerationService._string_list(normalized.get("recommendations", []), ("recommendation", "details", "description"))
-        normalized["source_refs"] = GenerationService._string_list(normalized.get("source_refs", []), ("id", "heading", "summary"))
+        normalized["recommendations"] = GenerationService._string_list(normalized.get("recommendations", []),
+                                                                       ("recommendation", "details", "description"))
+        normalized["source_refs"] = GenerationService._string_list(normalized.get("source_refs", []),
+                                                                   ("id", "heading", "summary"))
         return normalized
 
     @staticmethod
     def _normalize_slide(payload: dict[str, Any]) -> dict[str, Any]:
         normalized = GenerationService._normalize_payload(payload)
-        normalized["modules"] = GenerationService._string_list(normalized.get("modules", []), ("module_name", "name", "content", "description"))
-        normalized["visual_elements"] = GenerationService._string_list(normalized.get("visual_elements", []), ("element", "name", "description"))
-        normalized["page_text"] = GenerationService._string_list(GenerationService._list_field(normalized.get("page_text")), ("text", "content", "label", "title"))
-        normalized["source_refs"] = GenerationService._string_list(GenerationService._list_field(normalized.get("source_refs")), ("id", "heading", "summary"))
-        for key in ("title", "page_type", "page_role", "core_message", "layout", "color_rules", "text_hierarchy", "prompt"):
+        normalized["modules"] = GenerationService._string_list(normalized.get("modules", []),
+                                                               ("module_name", "name", "content", "description"))
+        normalized["visual_elements"] = GenerationService._string_list(normalized.get("visual_elements", []),
+                                                                       ("element", "name", "description"))
+        normalized["page_text"] = GenerationService._string_list(
+            GenerationService._list_field(normalized.get("page_text")), ("text", "content", "label", "title"))
+        normalized["source_refs"] = GenerationService._string_list(
+            GenerationService._list_field(normalized.get("source_refs")), ("id", "heading", "summary"))
+        for key in ("title", "page_type", "page_role", "core_message", "layout", "color_rules", "text_hierarchy",
+                    "prompt"):
             normalized[key] = GenerationService._text_field(normalized.get(key))
         return normalized
 
@@ -501,7 +523,8 @@ class GenerationService:
         normalized["visual_style"] = GenerationService._text_field(normalized.get("visual_style"))
         normalized["color_palette"] = GenerationService._color_list(normalized.get("color_palette"))
         for key in ("layout_rules", "composition_rules", "typography_rules", "icon_rules", "negative_rules"):
-            normalized[key] = GenerationService._string_list(GenerationService._list_field(normalized.get(key)), ("rule", "name", "description", "value"))
+            normalized[key] = GenerationService._string_list(GenerationService._list_field(normalized.get(key)),
+                                                             ("rule", "name", "description", "value"))
         return normalized
 
     @staticmethod
@@ -516,7 +539,8 @@ class GenerationService:
                 if isinstance(item, str):
                     colors.append(item)
                 elif isinstance(item, dict):
-                    text = item.get("hex") or item.get("color") or item.get("value") or json.dumps(item, ensure_ascii=False)
+                    text = item.get("hex") or item.get("color") or item.get("value") or json.dumps(item,
+                                                                                                   ensure_ascii=False)
                     colors.append(f"{key}: {text}")
                 else:
                     colors.append(f"{key}: {item}")
@@ -605,7 +629,8 @@ class GenerationService:
             "generation_options": data.generation_options.model_dump(mode="json"),
             "deck_brief": data.deck_brief.model_dump(mode="json") if data.deck_brief else None,
             "parsed_section_count": len(data.parsed_sections),
-            "source_slide_count_constraint": data.source_slide_count_constraint.model_dump(mode="json") if data.source_slide_count_constraint else None,
+            "source_slide_count_constraint": data.source_slide_count_constraint.model_dump(
+                mode="json") if data.source_slide_count_constraint else None,
         }
 
     def _style_guide_payload(self, data: ProjectData) -> dict[str, Any]:
@@ -617,7 +642,9 @@ class GenerationService:
 
     @staticmethod
     def _slide_prompts_payload(data: ProjectData, slides: list[Slide]) -> dict[str, Any]:
-        style_guide = data.style_guide.model_dump(mode="json") if data.style_guide else None
+        style_guide_model = TemplateService.enforce_style_guide_constraints(
+            data.style_guide) if data.style_guide else None
+        style_guide = style_guide_model.model_dump(mode="json") if style_guide_model else None
         if isinstance(style_guide, dict):
             style_guide = {
                 "visual_style": style_guide.get("visual_style"),
@@ -643,12 +670,12 @@ class GenerationService:
         return min(base, getattr(settings, setting_name))
 
     async def _call_json(
-        self,
-        stage: str,
-        task_prompt: str,
-        payload: dict[str, Any],
-        on_partial: Callable[[str], None] | None = None,
-        async_client: httpx.AsyncClient | None = None,
+            self,
+            stage: str,
+            task_prompt: str,
+            payload: dict[str, Any],
+            on_partial: Callable[[str], None] | None = None,
+            async_client: httpx.AsyncClient | None = None,
     ) -> dict[str, Any]:
         config = self._require_model_config()
         client = GatewayClient(config.base_url, config.api_key_encrypted, async_client=async_client)
@@ -681,7 +708,8 @@ class GenerationService:
                 )
             logger.info(
                 "[generation] stage={} model={} elapsed={:.1f}s input_chars={} output_chars={} max_tokens={}",
-                stage, config.selected_model, time.monotonic() - started, len(request_body), len(content), effective_max_tokens,
+                stage, config.selected_model, time.monotonic() - started, len(request_body), len(content),
+                effective_max_tokens,
             )
             return loads_json_with_repair(content)
         except GatewayError as exc:
@@ -691,7 +719,8 @@ class GenerationService:
             )
             raise HTTPException(status_code=502, detail=f"{stage}模型调用失败（{config.selected_model}）：{exc}") from exc
         except ValueError as exc:
-            raise HTTPException(status_code=502, detail=f"{stage}模型返回非 JSON（{config.selected_model}）：{exc}") from exc
+            raise HTTPException(status_code=502,
+                                detail=f"{stage}模型返回非 JSON（{config.selected_model}）：{exc}") from exc
 
     async def suggest_title(self, project_id: str) -> str:
         """让用户配置的文本模型为项目起一个简洁项目名。
@@ -750,16 +779,18 @@ class GenerationService:
 
     @staticmethod
     def _validate_model(
-        model: type[DeckBrief] | type[SlideCountPlan] | type[SourceSlideCountConstraint] | type[StyleGuide] | type[ConsistencyReport],
-        payload: dict[str, Any],
-        label: str,
+            model: type[DeckBrief] | type[SlideCountPlan] | type[SourceSlideCountConstraint] | type[StyleGuide] | type[
+                ConsistencyReport],
+            payload: dict[str, Any],
+            label: str,
     ):
         try:
             return model.model_validate(payload)
         except ValidationError as exc:
             first = exc.errors()[0]
             location = ".".join(str(item) for item in first.get("loc", [])) or "root"
-            raise HTTPException(status_code=502, detail=f"模型返回的{label}结构不合法：{location}：{first['msg']}") from exc
+            raise HTTPException(status_code=502,
+                                detail=f"模型返回的{label}结构不合法：{location}：{first['msg']}") from exc
 
     @staticmethod
     def _validate_source_slide_count_constraint(constraint: SourceSlideCountConstraint) -> None:
@@ -775,8 +806,8 @@ class GenerationService:
 
     @staticmethod
     def _tighten_source_slide_count_constraint(
-        constraint: SourceSlideCountConstraint,
-        source_content: str | None,
+            constraint: SourceSlideCountConstraint,
+            source_content: str | None,
     ) -> SourceSlideCountConstraint:
         if constraint.kind != "range" or constraint.max_count is None:
             return constraint
@@ -810,9 +841,9 @@ class GenerationService:
 
     @staticmethod
     def _validate_slide_count_plan(
-        plan: SlideCountPlan,
-        options: GenerationOptions,
-        source_constraint: SourceSlideCountConstraint | None = None,
+            plan: SlideCountPlan,
+            options: GenerationOptions,
+            source_constraint: SourceSlideCountConstraint | None = None,
     ) -> None:
         if plan.accepted_slide_count < 1:
             raise HTTPException(status_code=502, detail="模型推荐页数必须大于 0")

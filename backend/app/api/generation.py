@@ -6,6 +6,7 @@ from app.models.job import JobRecord
 from app.models.project import ProjectRecord
 from app.models.schemas import (
     CheckConsistencyRequest,
+    ConsistencyReport,
     GenerateImagesRequest,
     GenerateProjectRequest,
     JobResponse,
@@ -258,6 +259,7 @@ async def _run_image_generation_job(job_id: str, project_id: str, slide_numbers:
         job_service = JobService(session)
         job = job_service.get_job(job_id)
         try:
+            await _ensure_prompts_checked_before_image_generation(session, user_id, project_id, job_service, job)
             await ImageGenerationService(session, user_id).run_batch_generation(
                 project_id, slide_numbers, job_service, job, extra_prompt=extra_prompt
             )
@@ -271,3 +273,42 @@ async def _run_image_generation_job(job_id: str, project_id: str, slide_numbers:
                 exc,
             )
             job_service.update(job, stage="failed", progress=job.progress, message=str(exc), status="failed", error=str(exc))
+
+
+async def _ensure_prompts_checked_before_image_generation(
+    session: Session,
+    user_id: int,
+    project_id: str,
+    job_service: JobService,
+    job: JobRecord,
+) -> None:
+    service = GenerationService(session, user_id)
+    data = service.project_service.get_project_data_internal(project_id)
+    threshold = data.generation_options.consistency_threshold
+
+    report = data.consistency_report
+    if report is None or report.threshold != threshold:
+        job_service.update(job, stage="consistency_checking", progress=0.0, message="生图前检查 prompt 一致性", status="running")
+        data = await service.check_consistency_for_project(project_id, threshold)
+        report = data.consistency_report
+
+    if not _has_inconsistent_prompts(report, threshold):
+        return
+
+    job_service.update(job, stage="revising_prompts", progress=0.0, message="生图前自动修正不一致 prompt", status="running")
+    data = await service.revise_inconsistent_prompts(project_id, threshold)
+    if _has_inconsistent_prompts(data.consistency_report, threshold):
+        logger.warning(
+            "[image-job] prompts still inconsistent after preflight revision job_id={} project_id={} user_id={} threshold={}",
+            job.id,
+            project_id,
+            user_id,
+            threshold,
+        )
+
+
+def _has_inconsistent_prompts(report: ConsistencyReport | None, threshold: float) -> bool:
+    return any(
+        slide.revision_needed or slide.score < threshold
+        for slide in (report.slides if report else [])
+    )
