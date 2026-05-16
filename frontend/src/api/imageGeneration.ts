@@ -3,7 +3,7 @@ import type { JobResponse } from '../types/api';
 
 export interface GenerateImagesPayload {
   slide_numbers: number[] | null;
-  extra_prompt?: string | null;
+  extra_prompts?: Record<number, string> | null;
 }
 
 export function generateImages(projectId: string, payload: GenerateImagesPayload): Promise<JobResponse> {

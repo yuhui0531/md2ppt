@@ -16,6 +16,7 @@ from app.core.gateway_client import (
 from app.core.image_storage import save_data_uri
 from app.models.job import JobRecord
 from app.models.model_config import ModelConfigRecord
+from app.models.schemas import Slide
 from app.services.job_service import JobService
 from app.services.project_service import ProjectService
 
@@ -47,7 +48,7 @@ class ImageGenerationService:
         slide_numbers: list[int] | None,
         job_service: JobService,
         job: JobRecord,
-        extra_prompt: str | None = None,
+        extra_prompts: dict[int, str] | None = None,
     ) -> None:
         config = self.get_image_config()
         data = self.project_service.get_project_data_internal(project_id)
@@ -64,12 +65,12 @@ class ImageGenerationService:
 
         total = len(target_slides)
         logger.info(
-            "[image-gen] batch start job_id={} project_id={} total={} model={} extra_prompt_present={}",
+            "[image-gen] batch start job_id={} project_id={} total={} model={} extra_prompts_count={}",
             job.id,
             project_id,
             total,
             config.selected_model,
-            bool(extra_prompt),
+            len(extra_prompts or {}),
         )
         completed = 0
         failed_pages: list[int] = []
@@ -126,9 +127,7 @@ class ImageGenerationService:
             tasks = []
             for slide in target_slides:
                 idx = slide_indexes[slide.slide_no]
-                prompt = slide.prompt or f"slide {slide.slide_no}"
-                if extra_prompt:
-                    prompt = f"{prompt}\n\n{extra_prompt}"
+                prompt = self.build_slide_prompt(slide, extra_prompts=extra_prompts)
                 tasks.append(generate_one(idx, slide.slide_no, prompt))
 
             await asyncio.gather(*tasks)
@@ -168,3 +167,14 @@ class ImageGenerationService:
         else:
             logger.info("[image-gen] batch completed job_id={} project_id={} total={}", job.id, project_id, total)
             job_service.update(job, stage="completed", progress=1.0, message=f"全部 {total} 张生图完成", status="completed")
+
+    @staticmethod
+    def build_slide_prompt(
+        slide: Slide,
+        extra_prompts: dict[int, str] | None = None,
+    ) -> str:
+        prompt = slide.prompt or f"slide {slide.slide_no}"
+        normalized_extra_prompt = ((extra_prompts or {}).get(slide.slide_no) or "").strip()
+        if not normalized_extra_prompt:
+            return prompt
+        return f"{prompt}\n\n{normalized_extra_prompt}"

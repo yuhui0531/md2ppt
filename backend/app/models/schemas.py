@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ErrorResponse(BaseModel):
@@ -326,8 +326,9 @@ class ReviseInconsistentPromptsRequest(BaseModel):
 
 
 class GenerateImagesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     slide_numbers: list[int] | None = None
-    extra_prompt: str | None = None
+    extra_prompts: dict[int, str] | None = None
 
 
 class ExportRequest(BaseModel):

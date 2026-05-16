@@ -231,15 +231,23 @@ async def generate_images(
         raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
     job = job_service.create_job(project_id, kind="image_generation")
     logger.info(
-        "[image-job] created job_id={} project_id={} user_id={} slide_numbers={} extra_prompt_present={}",
+        "[image-job] created job_id={} project_id={} user_id={} slide_numbers={} extra_prompts_count={}",
         job.id,
         project_id,
         user_id,
         request.slide_numbers,
-        bool(request.extra_prompt),
+        len(request.extra_prompts or {}),
     )
     job_service.update(job, stage="queued", progress=0.0, message="批量生图任务已创建", status="running")
-    asyncio.create_task(_run_image_generation_job(job.id, project_id, request.slide_numbers, request.extra_prompt, user_id))
+    asyncio.create_task(
+        _run_image_generation_job(
+            job.id,
+            project_id,
+            request.slide_numbers,
+            request.extra_prompts,
+            user_id,
+        )
+    )
     return JobResponse(
         job_id=job.id,
         project_id=job.project_id,
@@ -252,7 +260,13 @@ async def generate_images(
     )
 
 
-async def _run_image_generation_job(job_id: str, project_id: str, slide_numbers: list[int] | None, extra_prompt: str | None = None, user_id: int = -1) -> None:
+async def _run_image_generation_job(
+    job_id: str,
+    project_id: str,
+    slide_numbers: list[int] | None,
+    extra_prompts: dict[int, str] | None = None,
+    user_id: int = -1,
+) -> None:
     # 同 _run_generation_job：user_id 用于在后台任务里定位调用者的生图模型配置。
     # 默认 -1 仅是签名兜底；正常路径下 API 入口一定会传真实 user_id 进来。
     with Session(engine) as session:
@@ -261,7 +275,11 @@ async def _run_image_generation_job(job_id: str, project_id: str, slide_numbers:
         try:
             await _ensure_prompts_checked_before_image_generation(session, user_id, project_id, job_service, job)
             await ImageGenerationService(session, user_id).run_batch_generation(
-                project_id, slide_numbers, job_service, job, extra_prompt=extra_prompt
+                project_id,
+                slide_numbers,
+                job_service,
+                job,
+                extra_prompts=extra_prompts,
             )
         except Exception as exc:
             logger.exception(

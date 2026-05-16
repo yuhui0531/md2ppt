@@ -10,7 +10,7 @@ import { MarkdownPreview } from '../components/MarkdownPreview';
 import { useProjectStore } from '../store/projectStore';
 import type { JobResponse } from '../types/api';
 
-import { Card, Col, Row, Typography, Button, Space, Spin, Input, Alert, Modal } from 'antd';
+import { Card, Col, Row, Typography, Button, Space, Spin, Input, Alert, Modal, Checkbox } from 'antd';
 import { PictureOutlined, DownloadOutlined, LeftOutlined, SyncOutlined, EyeOutlined } from '@ant-design/icons';
 
 const { Title, Text, Paragraph } = Typography;
@@ -40,6 +40,9 @@ export function ImageGenerationPage() {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [retryPrompt, setRetryPrompt] = useState('');
   const [viewPromptSlide, setViewPromptSlide] = useState<number | null>(null);
+  const [selectedSlides, setSelectedSlides] = useState<Set<number>>(new Set());
+  const [showMultiRetryModal, setShowMultiRetryModal] = useState(false);
+  const [multiRetryPrompts, setMultiRetryPrompts] = useState<Record<number, string>>({});
 
   // 路由 param 切换时同一 component 实例会复用，旧的 click handler 还在
   // 跑 await 链路；它们必须能知道用户已经离开了原项目，否则会把旧项目的
@@ -69,6 +72,9 @@ export function ImageGenerationPage() {
     setGeneratingSlides([]);
     setRetryingSlide(null);
     setRetryPrompt('');
+    setSelectedSlides(new Set());
+    setShowMultiRetryModal(false);
+    setMultiRetryPrompts({});
     let cancelled = false;
     (async () => {
       try {
@@ -194,6 +200,22 @@ export function ImageGenerationPage() {
     }
   }
 
+  async function runSingleSlideRetry(
+    slideNo: number,
+    extraPrompt: string | null,
+    baselineUrls: Map<number, string | null>,
+    startedFor: string,
+  ): Promise<JobResponse> {
+    const extraPrompts = extraPrompt ? { [slideNo]: extraPrompt } : null;
+    const createdJob = await generateImages(startedFor, {
+      slide_numbers: [slideNo],
+      extra_prompts: extraPrompts,
+    });
+    if (!stillScoped(startedFor)) throw new Error('project changed');
+    setJob(createdJob);
+    return pollAndRefresh(createdJob.job_id, baselineUrls, startedFor);
+  }
+
   async function handleRetrySlide(slideNo: number) {
     if (!project) return;
     const startedFor = project.project_id;
@@ -203,13 +225,7 @@ export function ImageGenerationPage() {
     setMessage(null);
     setJob(null);
     try {
-      const createdJob = await generateImages(startedFor, {
-        slide_numbers: [slideNo],
-        extra_prompt: retryPrompt.trim() || null,
-      });
-      if (!stillScoped(startedFor)) return;
-      setJob(createdJob);
-      const finalJob = await pollAndRefresh(createdJob.job_id, baselineUrls, startedFor);
+      const finalJob = await runSingleSlideRetry(slideNo, retryPrompt.trim() || null, baselineUrls, startedFor);
       if (!stillScoped(startedFor)) return;
       if (finalJob.error) {
         setMessage({ kind: 'error', text: `第${slideNo}页重试失败：${finalJob.error}` });
@@ -225,6 +241,48 @@ export function ImageGenerationPage() {
         setGeneratingSlides([]);
         setRetryingSlide(null);
         setRetryPrompt('');
+      }
+    }
+  }
+
+  async function handleMultiRetry() {
+    if (!project || selectedSlides.size === 0) return;
+    const slides = [...selectedSlides].sort((a, b) => a - b);
+    const startedFor = project.project_id;
+    setBusy(true);
+    const baselineUrls = new Map(project.slides.map((s) => [s.slide_no, s.image_url ?? null]));
+    setGeneratingSlides([...slides]);
+    setMessage(null);
+    setJob(null);
+    setShowMultiRetryModal(false);
+    try {
+      const extraPrompts = Object.fromEntries(
+        slides
+          .map((slideNo) => [slideNo, multiRetryPrompts[slideNo]?.trim() || ''])
+          .filter(([, prompt]) => Boolean(prompt)),
+      );
+      const createdJob = await generateImages(startedFor, {
+        slide_numbers: slides,
+        extra_prompts: Object.keys(extraPrompts).length > 0 ? extraPrompts : null,
+      });
+      if (!stillScoped(startedFor)) return;
+      setJob(createdJob);
+      const finalJob = await pollAndRefresh(createdJob.job_id, baselineUrls, startedFor);
+      if (!stillScoped(startedFor)) return;
+      if (finalJob.error) {
+        setMessage({ kind: 'error', text: `批量重新生成存在失败：${finalJob.error}` });
+      } else {
+        setMessage({ kind: 'success', text: `${slides.length} 张图片重新生成完成` });
+      }
+    } catch (error) {
+      if (!stillScoped(startedFor)) return;
+      setMessage({ kind: 'error', text: error instanceof Error ? error.message : '批量重新生成失败' });
+    } finally {
+      if (stillScoped(startedFor)) {
+        setBusy(false);
+        setGeneratingSlides([]);
+        setSelectedSlides(new Set());
+        setMultiRetryPrompts({});
       }
     }
   }
@@ -318,6 +376,11 @@ export function ImageGenerationPage() {
             <Button icon={<SyncOutlined />} onClick={handleRetryFailedSlides} disabled={!canRetryFailedSlides}>
               仅重试失败页
             </Button>
+            {selectedSlides.size > 0 && (
+              <Button icon={<SyncOutlined />} onClick={() => setShowMultiRetryModal(true)} disabled={busy}>
+                重新生成已选 ({selectedSlides.size})
+              </Button>
+            )}
             <Button icon={<DownloadOutlined />} onClick={handleExportPptx} disabled={busy || !project.slides.some((s) => s.image_url)}>
               下载 PPT
             </Button>
@@ -336,17 +399,32 @@ export function ImageGenerationPage() {
       <Row gutter={[24, 24]}>
         {project.slides.map((slide) => (
           <Col xs={24} sm={12} lg={8} xl={6} key={slide.slide_no}>
-            <Card 
-              bordered={true} 
+            <Card
+              bordered={true}
               hoverable
-              style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+              style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...(selectedSlides.has(slide.slide_no) ? { borderColor: '#1677ff', boxShadow: '0 0 0 2px rgba(22,119,255,0.2)' } : {}) }}
               bodyStyle={{ padding: 16, flex: 1, display: 'flex', flexDirection: 'column' }}
               className="image-card"
             >
-              <div style={{ marginBottom: 12 }}>
-                <Text strong style={{ fontSize: 16 }}>第{slide.slide_no}页</Text>
-                <br />
-                <Text type="secondary" ellipsis={{ tooltip: slide.title }}>{slide.title}</Text>
+              <div style={{ marginBottom: 12, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                <div>
+                  <Text strong style={{ fontSize: 16 }}>第{slide.slide_no}页</Text>
+                  <br />
+                  <Text type="secondary" ellipsis={{ tooltip: slide.title }}>{slide.title}</Text>
+                </div>
+                {!busy && slide.prompt && (
+                  <Checkbox
+                    checked={selectedSlides.has(slide.slide_no)}
+                    onChange={(e) => {
+                      setSelectedSlides((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(slide.slide_no);
+                        else next.delete(slide.slide_no);
+                        return next;
+                      });
+                    }}
+                  />
+                )}
               </div>
               
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#f5f5f5', borderRadius: 8, overflow: 'hidden', minHeight: 200, marginBottom: 16, position: 'relative' }}>
@@ -415,6 +493,37 @@ export function ImageGenerationPage() {
 
       {lightboxIndex !== null && (
         <ImageLightbox images={galleryImages} initialIndex={lightboxIndex} onClose={() => setLightboxIndex(null)} />
+      )}
+
+      {showMultiRetryModal && (
+        <Modal
+          title={`重新生成已选 ${selectedSlides.size} 张`}
+          open={true}
+          onCancel={() => setShowMultiRetryModal(false)}
+          onOk={handleMultiRetry}
+          okText="开始生成"
+          cancelText="取消"
+          width={600}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxHeight: '60vh', overflowY: 'auto', padding: '8px 0' }}>
+            {[...selectedSlides].sort((a, b) => a - b).map((slideNo) => {
+              const slide = project.slides.find((s) => s.slide_no === slideNo);
+              if (!slide) return null;
+              return (
+                <div key={slideNo} style={{ borderBottom: '1px solid #f0f0f0', paddingBottom: 16 }}>
+                  <Text strong>第{slideNo}页：{slide.title}</Text>
+                  <TextArea
+                    style={{ marginTop: 8 }}
+                    autoSize={{ minRows: 2, maxRows: 6 }}
+                    placeholder="输入改进要求（可选）"
+                    value={multiRetryPrompts[slideNo] || ''}
+                    onChange={(e) => setMultiRetryPrompts((prev) => ({ ...prev, [slideNo]: e.target.value }))}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </Modal>
       )}
 
       {viewPromptSlide !== null && (
