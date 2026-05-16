@@ -23,22 +23,25 @@ class ExportService:
 
     def export_project(self, project_id: str, export_format: str, include_index: bool = True) -> ExportResponse:
         data = self.project_service.get_project_data_internal(project_id)
+        project_record = self.session.get(ProjectRecord, project_id)
         self.export_dir.mkdir(parents=True, exist_ok=True)
         export_id = uuid4().hex[:12]
         stem = f"{project_id}__{export_id}"
 
+        project_title = project_record.title if project_record else self._project_title(data)
+
         if export_format == "json":
-            filename = f"{self._safe_filename(self._project_title(data))}-ppt-prompts.json"
+            filename = f"{self._safe_filename(project_title)}-ppt-prompts.json"
             path = self.export_dir / f"{stem}.json"
             path.write_text(self._json_content(data), encoding="utf-8")
             content_type = "application/json"
         elif export_format == "markdown":
-            filename = f"{self._safe_filename(self._project_title(data))}-ppt-prompts.md"
+            filename = f"{self._safe_filename(project_title)}-ppt-prompts.md"
             path = self.export_dir / f"{stem}.md"
             path.write_text(self._markdown_content(data), encoding="utf-8")
             content_type = "text/markdown"
         elif export_format == "prompt_zip":
-            filename = f"{self._safe_filename(self._project_title(data))}-slide-prompts.zip"
+            filename = f"{self._safe_filename(project_title)}-slide-prompts.zip"
             path = self.export_dir / f"{stem}.zip"
             path.write_bytes(self._prompt_zip_content(data, include_index))
             content_type = "application/zip"

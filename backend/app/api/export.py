@@ -71,6 +71,7 @@ async def export_pptx(
     user_id: int = Depends(get_current_user_id),
 ) -> ExportResponse:
     from app.config import settings
+    from app.models.project import ProjectRecord
 
     project_service = ProjectService(session)
     data = project_service.get_project_data(project_id, user_id=user_id)
@@ -123,8 +124,11 @@ async def export_pptx(
     prs.save(pptx_bytes)
     path.write_bytes(pptx_bytes.getvalue())
 
-    title = data.source.get("filename", "") or data.project_id
-    safe_title = re.sub(r'[^\w一-鿿\-.]', '_', title)[:80]
+    project_record = session.get(ProjectRecord, project_id)
+    project_title = project_record.title if project_record else data.project_id
+    safe_title = re.sub(r"[\\/:*?\"<>|\s]+", "-", project_title.strip())
+    safe_title = re.sub(r"-+", "-", safe_title).strip("-.")
+    safe_title = safe_title[:80] or "material"
     filename = f"{safe_title}-slides.pptx"
 
     return ExportResponse(
