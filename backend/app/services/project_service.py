@@ -7,10 +7,10 @@ from uuid import uuid4
 from fastapi import HTTPException
 from sqlmodel import Session, delete, select
 
-from app.core.image_storage import project_image_dir
+from app.core.image_storage import project_image_dir, resolve_local_path
 from app.models.job import JobRecord
 from app.models.project import ParsedSectionRecord, ProjectRecord
-from app.models.schemas import CreateProjectRequest, ParsedSection, ProjectData, ProjectSummary
+from app.models.schemas import CreateProjectRequest, ParsedSection, ProjectData, ProjectSummary, Slide
 from app.services.markdown_parser import MarkdownParserService
 from app.services.template_service import TemplateService
 
@@ -69,8 +69,11 @@ class ProjectService:
 
     def get_project_data(self, project_id: str, user_id: int) -> ProjectData:
         record = self._get_owned_record(project_id, user_id)
-        data = ProjectData.model_validate(json.loads(record.data_json))
+        raw = json.loads(record.data_json)
+        data = ProjectData.model_validate(raw)
         self._ensure_record_title(record, data)
+        if self._backfill_slide_ids(data, raw):
+            self.save_project_data(data)
         return self._with_enforced_style_guide(data)
 
     def list_projects(self, user_id: int) -> list[ProjectSummary]:
@@ -124,8 +127,11 @@ class ProjectService:
         record = self.session.get(ProjectRecord, project_id)
         if not record:
             raise HTTPException(status_code=404, detail="项目不存在")
-        data = ProjectData.model_validate(json.loads(record.data_json))
+        raw = json.loads(record.data_json)
+        data = ProjectData.model_validate(raw)
         self._ensure_record_title(record, data)
+        if self._backfill_slide_ids(data, raw):
+            self.save_project_data(data)
         return self._with_enforced_style_guide(data)
 
     def rename_project(self, project_id: str, title: str, user_id: int) -> ProjectRecord:
@@ -192,6 +198,70 @@ class ProjectService:
     def _with_enforced_style_guide(data: ProjectData) -> ProjectData:
         if data.style_guide is not None:
             data.style_guide = TemplateService.enforce_style_guide_constraints(data.style_guide)
+        return data
+
+    @staticmethod
+    def _backfill_slide_ids(data: ProjectData, raw: dict) -> bool:
+        """老数据没有 Slide.id。Pydantic 在 model_validate 时已经用 default_factory
+        生成了 id，但这意味着我们无法从 data 上区分"真的有 id"和"被 factory 补的"。
+        用 raw dict 判断每条 slide 是否原本就带 id；缺失视为脏，调用方决定持久化。"""
+        raw_slides = raw.get("slides") if isinstance(raw, dict) else None
+        if not isinstance(raw_slides, list):
+            return False
+        dirty = False
+        for slide, raw_slide in zip(data.slides, raw_slides):
+            if isinstance(raw_slide, dict) and not raw_slide.get("id"):
+                dirty = True
+                break
+        return dirty
+
+    @staticmethod
+    def _renumber_slides(slides: list[Slide]) -> None:
+        for index, slide in enumerate(slides, start=1):
+            slide.slide_no = index
+
+    def insert_slide(self, project_id: str, after_slide_id: str | None, prompt: str) -> tuple[ProjectData, str]:
+        """插入新 slide：after_slide_id 为空插在开头，否则插在该 id 的后面。
+        返回更新后的 ProjectData 和新 slide 的 id，便于前端定位选中。"""
+        data = self.get_project_data_internal(project_id)
+        if after_slide_id is None:
+            position = 0
+        else:
+            position = next((i for i, s in enumerate(data.slides) if s.id == after_slide_id), -1)
+            if position < 0:
+                raise HTTPException(status_code=404, detail="未找到指定的页面")
+            position += 1
+        new_slide = Slide(slide_no=0, title="", page_type="", prompt=prompt)
+        data.slides.insert(position, new_slide)
+        self._renumber_slides(data.slides)
+        data.consistency_report = None
+        self.save_project_data(data)
+        return data, new_slide.id
+
+    def update_slide_prompt(self, project_id: str, slide_id: str, prompt: str) -> ProjectData:
+        data = self.get_project_data_internal(project_id)
+        slide = next((s for s in data.slides if s.id == slide_id), None)
+        if slide is None:
+            raise HTTPException(status_code=404, detail="未找到指定的页面")
+        slide.prompt = prompt
+        data.consistency_report = None
+        self.save_project_data(data)
+        return data
+
+    def delete_slide(self, project_id: str, slide_id: str) -> ProjectData:
+        data = self.get_project_data_internal(project_id)
+        index = next((i for i, s in enumerate(data.slides) if s.id == slide_id), -1)
+        if index < 0:
+            raise HTTPException(status_code=404, detail="未找到指定的页面")
+        target = data.slides[index]
+        if target.image_url:
+            local_path = resolve_local_path(target.image_url)
+            if local_path is not None:
+                local_path.unlink(missing_ok=True)
+        data.slides.pop(index)
+        self._renumber_slides(data.slides)
+        data.consistency_report = None
+        self.save_project_data(data)
         return data
 
     @staticmethod

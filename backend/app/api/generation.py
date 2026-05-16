@@ -7,6 +7,8 @@ from app.models.project import ProjectRecord
 from app.models.schemas import (
     CheckConsistencyRequest,
     ConsistencyReport,
+    CreateSlideRequest,
+    CreateSlideResponse,
     GenerateImagesRequest,
     GenerateProjectRequest,
     JobResponse,
@@ -14,6 +16,7 @@ from app.models.schemas import (
     RegenerateOutlineRequest,
     RegeneratePromptsRequest,
     ReviseInconsistentPromptsRequest,
+    UpdateSlidePromptRequest,
 )
 from app.services.generation_service import GenerationService
 from app.services.image_generation_service import ImageGenerationService
@@ -213,6 +216,51 @@ async def revise_inconsistent_prompts(
 ) -> ProjectResponse:
     _assert_project_owner(session, project_id, user_id)
     updated = await GenerationService(session, user_id).revise_inconsistent_prompts(project_id, request.threshold)
+    return ProjectResponse(project=updated)
+
+
+def _assert_no_active_job(session: Session, project_id: str) -> None:
+    if JobService(session).has_active_job(project_id):
+        raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
+
+
+@router.post("/api/projects/{project_id}/slides", response_model=CreateSlideResponse)
+def create_slide(
+    project_id: str,
+    request: CreateSlideRequest,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> CreateSlideResponse:
+    _assert_project_owner(session, project_id, user_id)
+    _assert_no_active_job(session, project_id)
+    updated, new_slide_id = ProjectService(session).insert_slide(project_id, request.after_slide_id, request.prompt)
+    return CreateSlideResponse(project=updated, new_slide_id=new_slide_id)
+
+
+@router.patch("/api/projects/{project_id}/slides/{slide_id}", response_model=ProjectResponse)
+def update_slide_prompt(
+    project_id: str,
+    slide_id: str,
+    request: UpdateSlidePromptRequest,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> ProjectResponse:
+    _assert_project_owner(session, project_id, user_id)
+    _assert_no_active_job(session, project_id)
+    updated = ProjectService(session).update_slide_prompt(project_id, slide_id, request.prompt)
+    return ProjectResponse(project=updated)
+
+
+@router.delete("/api/projects/{project_id}/slides/{slide_id}", response_model=ProjectResponse)
+def delete_slide(
+    project_id: str,
+    slide_id: str,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> ProjectResponse:
+    _assert_project_owner(session, project_id, user_id)
+    _assert_no_active_job(session, project_id)
+    updated = ProjectService(session).delete_slide(project_id, slide_id)
     return ProjectResponse(project=updated)
 
 

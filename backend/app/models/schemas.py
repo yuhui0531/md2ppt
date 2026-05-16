@@ -1,6 +1,11 @@
 from typing import Any, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+def _new_slide_id() -> str:
+    return f"sld_{uuid4().hex[:12]}"
 
 
 class ErrorResponse(BaseModel):
@@ -236,6 +241,7 @@ class StyleGuide(BaseModel):
 
 class Slide(BaseModel):
     slide_no: int
+    id: str = Field(default_factory=_new_slide_id)
     title: str
     page_type: str
     page_role: str = ""
@@ -313,6 +319,20 @@ class RegeneratePromptsRequest(BaseModel):
     slide_numbers: list[int] | None = None
     use_current_outline: bool = True
     use_current_style_guide: bool = True
+
+
+class CreateSlideRequest(BaseModel):
+    after_slide_id: str | None = None
+    prompt: str = ""
+
+
+class CreateSlideResponse(BaseModel):
+    project: ProjectData
+    new_slide_id: str
+
+
+class UpdateSlidePromptRequest(BaseModel):
+    prompt: str
 
 
 class CheckConsistencyRequest(BaseModel):

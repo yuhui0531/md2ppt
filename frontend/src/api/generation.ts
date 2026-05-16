@@ -54,3 +54,30 @@ export async function reviseInconsistentPrompts(projectId: string, threshold: nu
   });
   return response.project;
 }
+
+export async function insertSlide(
+  projectId: string,
+  afterSlideId: string | null,
+  prompt: string,
+): Promise<{ project: ProjectData; newSlideId: string }> {
+  const response = await api<{ project: ProjectData; new_slide_id: string }>(`/api/projects/${projectId}/slides`, {
+    method: 'POST',
+    body: JSON.stringify({ after_slide_id: afterSlideId, prompt }),
+  });
+  return { project: response.project, newSlideId: response.new_slide_id };
+}
+
+export async function updateSlidePrompt(projectId: string, slideId: string, prompt: string): Promise<ProjectData> {
+  const response = await api<{ project: ProjectData }>(`/api/projects/${projectId}/slides/${slideId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ prompt }),
+  });
+  return response.project;
+}
+
+export async function deleteSlide(projectId: string, slideId: string): Promise<ProjectData> {
+  const response = await api<{ project: ProjectData }>(`/api/projects/${projectId}/slides/${slideId}`, {
+    method: 'DELETE',
+  });
+  return response.project;
+}

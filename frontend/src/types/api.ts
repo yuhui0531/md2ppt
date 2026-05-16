@@ -88,6 +88,7 @@ export interface StyleGuide {
 
 export interface Slide {
   slide_no: number;
+  id: string;
   title: string;
   page_type: string;
   page_role: string;

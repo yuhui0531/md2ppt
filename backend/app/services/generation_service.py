@@ -224,7 +224,17 @@ class GenerationService:
             generated = await self.generate_slide_prompts(data, slide_numbers, async_client=async_client)
         if slide_numbers:
             by_no = {slide.slide_no: slide for slide in generated}
-            data.slides = [by_no.get(slide.slide_no, slide) for slide in data.slides]
+            merged: list[Slide] = []
+            for original in data.slides:
+                replacement = by_no.get(original.slide_no)
+                if replacement is None:
+                    merged.append(original)
+                    continue
+                # 部分重生时 LLM 返回的 slide 不带 id；保留原 id 才能让一致性
+                # 报告、图片、前端选中态在重生前后保持锚定。
+                replacement.id = original.id
+                merged.append(replacement)
+            data.slides = merged
         else:
             data.slides = generated
         data.consistency_report = None
@@ -265,7 +275,16 @@ class GenerationService:
             )
             revised = [Slide.model_validate(slide) for slide in payload.get("slides", [])]
             by_no = {slide.slide_no: slide for slide in revised}
-            data.slides = [by_no.get(slide.slide_no, slide) for slide in data.slides]
+            merged: list[Slide] = []
+            for original in data.slides:
+                replacement = by_no.get(original.slide_no)
+                if replacement is None:
+                    merged.append(original)
+                    continue
+                # 同 regenerate_prompts：LLM 不知道 Slide.id，需要把原 id 写回。
+                replacement.id = original.id
+                merged.append(replacement)
+            data.slides = merged
             data.consistency_report = await self.check_consistency(data, threshold, async_client=async_client)
         data.generation_state = "revised"
         self.project_service.save_project_data(data)
