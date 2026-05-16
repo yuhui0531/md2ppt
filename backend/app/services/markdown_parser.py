@@ -3,12 +3,13 @@ import re
 from app.models.schemas import ParsedSection
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
-_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-_LINK_RE = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
+_IMAGE_RE = re.compile(r"!\[([^]]*)]\(([^)]+)\)")
+_LINK_RE = re.compile(r"(?<!!)\[([^]]+)]\(([^)]+)\)")
 
 
 class MarkdownParserService:
-    def parse(self, content: str) -> list[ParsedSection]:
+    @staticmethod
+    def parse(content: str) -> list[ParsedSection]:
         lines = content.splitlines()
         sections: list[ParsedSection] = []
         current_heading = "未命名素材"
@@ -68,7 +69,8 @@ class MarkdownParserService:
             if heading_match:
                 flush()
                 level = len(heading_match.group(1))
-                parent_stack = [(stack_level, stack_id) for stack_level, stack_id in parent_stack if stack_level < level]
+                parent_stack = [(stack_level, stack_id) for stack_level, stack_id in parent_stack if
+                                stack_level < level]
                 current_heading = heading_match.group(2).strip()
                 current_level = level
                 current_lines = []

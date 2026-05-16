@@ -13,5 +13,7 @@ frontend/dist/
 .DS_Store
 .idea
 .playwright-mcp
+.claude/worktrees/
 .venv
 app.db
+docs/sso-integration.md
