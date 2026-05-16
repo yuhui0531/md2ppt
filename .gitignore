@@ -17,3 +17,4 @@ frontend/dist/
 .venv
 app.db
 docs/sso-integration.md
+tests/
