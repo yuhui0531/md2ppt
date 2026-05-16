@@ -103,6 +103,7 @@ class ProjectService:
                     source_language=record.source_language,
                     generation_state=record.generation_state,
                     slide_count=len(slides) if isinstance(slides, list) else 0,
+                    project_origin=record.project_origin or "generated_markdown",
                     created_at=record.created_at.isoformat(),
                     updated_at=record.updated_at.isoformat(),
                 )
@@ -121,6 +122,29 @@ class ProjectService:
         record.updated_at = datetime.now(timezone.utc)
         self.session.add(record)
         self.session.commit()
+
+    def revert_import_structure_state(self, project_id: str) -> None:
+        """把导入型项目的 generation_state 从 'import_structure_generating' 回退到
+        'prompts_imported'。供 worker 失败/取消分支与 JobService timeout sweep 共用：
+        否则 worker 进程被 kill / OOM 走 sweep 路径时，项目状态永远卡在
+        'import_structure_generating'，前端标签长期误显示「正在补全结构」。
+
+        幂等：仅当项目状态确实是 import_structure_generating 且没有活跃 job 时才动。
+        """
+        record = self.session.get(ProjectRecord, project_id)
+        if not record or record.generation_state != "import_structure_generating":
+            return
+        # 这里不查 has_active_job 是因为 sweep 路径在调用此方法之前已经把超时 job
+        # 标 failed；worker 路径自己已经把 job 写 failed。所以调用方语义就是
+        # "现在确实没有 worker 在动这个项目了"。
+        try:
+            data = self.get_project_data_internal(project_id)
+        except HTTPException:
+            return
+        if data.generation_state != "import_structure_generating":
+            return
+        data.generation_state = "prompts_imported"
+        self.save_project_data(data)
 
     def get_project_data_internal(self, project_id: str) -> ProjectData:
         """后台任务等已通过入口归属校验的内部场景使用，不再二次校验。"""

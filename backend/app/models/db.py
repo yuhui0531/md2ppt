@@ -140,6 +140,38 @@ def _needs_job_kind_migration() -> bool:
         conn.close()
 
 
+def _needs_project_origin_migration() -> bool:
+    db_path = settings.storage_dir / "app.db"
+    if not db_path.exists():
+        return False
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cursor = conn.execute("PRAGMA table_info(projectrecord)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if not columns:
+            return False
+        return "project_origin" not in columns
+    finally:
+        conn.close()
+
+
+def _apply_project_origin_migration() -> None:
+    """给 projectrecord 加 project_origin 列，区分 Markdown 生成型 vs 导入型项目。
+    历史行一律按 'generated_markdown' 处理：导入型项目在加这列之前还没上线。"""
+    db_path = settings.storage_dir / "app.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "ALTER TABLE projectrecord ADD COLUMN project_origin VARCHAR NOT NULL DEFAULT 'generated_markdown'"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_projectrecord_project_origin ON projectrecord(project_origin)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _apply_job_kind_migration() -> None:
     """给 jobrecord 加 kind 列，区分 PPT 生成 vs 批量生图。
     历史行一律按 "generation" 处理：旧库里能跑的都是 PPT 生成，
@@ -177,6 +209,9 @@ def init_db() -> None:
 
     if _needs_job_kind_migration():
         _apply_job_kind_migration()
+
+    if _needs_project_origin_migration():
+        _apply_project_origin_migration()
 
     SQLModel.metadata.create_all(engine)
 

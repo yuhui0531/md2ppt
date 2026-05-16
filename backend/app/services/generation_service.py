@@ -19,6 +19,10 @@ from app.core.gateway_client import (
 from app.core.json_repair import loads_json_with_repair
 from app.core.prompts.brief import BRIEF_PROMPT
 from app.core.prompts.consistency import CONSISTENCY_PROMPT
+from app.core.prompts.import_structure import (
+    IMPORT_DECK_BRIEF_PROMPT,
+    IMPORT_SLIDE_STRUCTURE_PROMPT,
+)
 from app.core.prompts.outline import OUTLINE_PROMPT
 from app.core.prompts.revise import REVISE_PROMPT
 from app.core.prompts.slide_count import SLIDE_COUNT_PROMPT
@@ -246,7 +250,10 @@ class GenerationService:
         data = self.project_service.get_project_data_internal(project_id)
         async with build_gateway_async_client() as async_client:
             data.consistency_report = await self.check_consistency(data, threshold, async_client=async_client)
-        data.generation_state = "consistency_checked"
+        # 导入型项目的生命周期标记是 import_structure_generated，不应被一致性检查覆盖：
+        # 否则 workspace 状态标签会从「结构已补全」变成「已检查一致性」让用户困惑。
+        if data.project_origin != "imported_prompts":
+            data.generation_state = "consistency_checked"
         self.project_service.save_project_data(data)
         return data
 
@@ -286,9 +293,218 @@ class GenerationService:
                 merged.append(replacement)
             data.slides = merged
             data.consistency_report = await self.check_consistency(data, threshold, async_client=async_client)
-        data.generation_state = "revised"
+        # 同 check_consistency_for_project：imported 项目保留 import_structure_generated，
+        # 避免污染生命周期标签。
+        if data.project_origin != "imported_prompts":
+            data.generation_state = "revised"
         self.project_service.save_project_data(data)
         return data
+
+    async def run_import_structure_extraction(
+            self,
+            project_id: str,
+            job_service: JobService | None = None,
+            job: JobRecord | None = None,
+    ) -> ProjectData:
+        """从导入项目的 slide.prompt 抽取结构化字段，不改写 prompt。
+
+        阶段：扫描 → 逐页抽取（并发，按 done/total 推进度）→ 项目级 DeckBrief → 保存。
+        单页失败时该页字段保持当前值并记 warning，整体任务不挂；只在所有页都没拿到 LLM 响应时才把整个 job 标 failed。
+
+        重新解析场景：先清空所有结构化派生字段——_apply_import_structure 出于 idempotent
+        考虑遇到 LLM 空值就保留旧值（避免 LLM 偶尔丢字段把已有字段无声覆盖）。第一次
+        导入时这些字段本来就空，清空无副作用；重新解析时不清就会让旧 page_type/modules/
+        page_text 残留。prompt 和 title 不清：prompt 是核心约束，title 可能被用户手改过。"""
+        data = self.project_service.get_project_data_internal(project_id)
+        if data.project_origin != "imported_prompts":
+            raise HTTPException(status_code=409, detail="仅导入型项目支持结构补全任务")
+
+        for slide in data.slides:
+            slide.page_type = ""
+            slide.page_role = ""
+            slide.core_message = ""
+            slide.layout = ""
+            slide.color_rules = ""
+            slide.text_hierarchy = ""
+            slide.modules = []
+            slide.visual_elements = []
+            slide.page_text = []
+        data.deck_brief = None
+        data.consistency_report = None
+
+        self._update_job(job_service, job, "import_scanning", 0.05, "正在扫描导入文件")
+        self._ensure_not_cancelled(job_service, job)
+        data.generation_state = "import_structure_generating"
+        self.project_service.save_project_data(data)
+
+        total = len(data.slides)
+        if total == 0:
+            # 空项目走最短路径：状态字段写完即返回，由外层 runner 统一标 completed。
+            data.generation_state = "import_structure_generated"
+            self.project_service.save_project_data(data)
+            return data
+
+        base = 0.10
+        span = 0.70  # 占进度 10%→80% 给逐页抽取
+        semaphore = asyncio.Semaphore(max(1, settings.import_structure_concurrency))
+        # 阶段性落盘：worker 进程被 kill / 模型间歇性失败时也保住已抽出的字段，
+        # 避免用户回到工作台只能等 180s 超时清扫后再手点"重新解析"。
+        # total<4 时 total // 4 == 0，被 max 兜到 1。
+        save_every = max(1, total // 4)
+        state: dict[str, Any] = {"done": 0, "failed": 0, "last_flush_at": 0.0, "last_saved_done": 0}
+
+        def flush_progress(force: bool = False) -> None:
+            now = time.monotonic()
+            if not force and now - state["last_flush_at"] < settings.image_progress_flush_interval_seconds:
+                return
+            done = state["done"]
+            self._update_job(
+                job_service,
+                job,
+                "import_outline_extracting",
+                base + min(done / total, 1.0) * span,
+                f"正在提取页面结构（{done}/{total}）",
+            )
+            state["last_flush_at"] = now
+
+        def maybe_save() -> None:
+            """每完成 N 页或最后一页都落一次盘，让中途崩溃也能保留部分结果。
+            任务期间禁止用户保存 prompt（后端 PATCH 守卫 + 前端按钮 disable），
+            所以这里走普通 save_project_data 不会与用户写发生 lost update。"""
+            done = state["done"]
+            if done < total and done - state["last_saved_done"] < save_every:
+                return
+            self.project_service.save_project_data(data)
+            state["last_saved_done"] = done
+
+        flush_progress(force=True)
+
+        async with build_gateway_async_client() as async_client:
+            async def extract_one(slide_index: int) -> None:
+                self._ensure_not_cancelled(job_service, job)
+                slide = data.slides[slide_index]
+                prompt_text = slide.prompt or ""
+                if not prompt_text.strip():
+                    state["done"] += 1
+                    flush_progress()
+                    maybe_save()
+                    return
+                async with semaphore:
+                    try:
+                        payload = await self._call_json(
+                            "解析逐页提示词",
+                            IMPORT_SLIDE_STRUCTURE_PROMPT,
+                            {
+                                "slide_no": slide.slide_no,
+                                "existing_title": slide.title,
+                                "prompt": prompt_text,
+                            },
+                            async_client=async_client,
+                        )
+                    except HTTPException as exc:
+                        if exc.status_code == 499:
+                            raise
+                        state["failed"] += 1
+                        logger.warning(
+                            "[import-structure] slide failed project_id={} slide_no={} status={} detail={}",
+                            project_id, slide.slide_no, exc.status_code, exc.detail,
+                        )
+                        state["done"] += 1
+                        flush_progress()
+                        maybe_save()
+                        return
+                    except Exception as exc:
+                        state["failed"] += 1
+                        logger.warning(
+                            "[import-structure] slide errored project_id={} slide_no={} error={}",
+                            project_id, slide.slide_no, exc,
+                        )
+                        state["done"] += 1
+                        flush_progress()
+                        maybe_save()
+                        return
+                    normalized = self._normalize_slide(payload)
+                    self._apply_import_structure(slide, normalized)
+                    state["done"] += 1
+                    flush_progress()
+                    maybe_save()
+
+            tasks = [asyncio.create_task(extract_one(i)) for i in range(total)]
+            try:
+                await asyncio.gather(*tasks)
+            except Exception:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+
+            # 抽取结果阶段性落盘（即便后续 brief 失败，逐页字段也保留）。
+            self.project_service.save_project_data(data)
+            self._ensure_not_cancelled(job_service, job)
+
+            if state["failed"] >= total:
+                raise HTTPException(status_code=502, detail="所有页面的结构提取均失败，请检查模型配置或稍后重试")
+
+            self._update_job(job_service, job, "import_brief_generating", 0.88, "正在汇总整套提示词的大纲信息")
+            try:
+                brief_payload = await self._call_json(
+                    "汇总整体大纲",
+                    IMPORT_DECK_BRIEF_PROMPT,
+                    {
+                        "slides": [
+                            {
+                                "slide_no": slide.slide_no,
+                                "title": slide.title,
+                                "page_type": slide.page_type,
+                                "page_role": slide.page_role,
+                                "core_message": slide.core_message,
+                            }
+                            for slide in data.slides
+                        ],
+                    },
+                    async_client=async_client,
+                )
+                data.deck_brief = self._validate_model(DeckBrief, self._normalize_brief(brief_payload), "整体大纲汇总")
+            except HTTPException as exc:
+                if exc.status_code == 499:
+                    raise
+                logger.warning(
+                    "[import-structure] deck_brief failed project_id={} status={} detail={}",
+                    project_id, exc.status_code, exc.detail,
+                )
+
+        self._update_job(job_service, job, "import_structure_saving", 0.96, "正在保存结构化结果")
+        data.consistency_report = None
+        data.generation_state = "import_structure_generated"
+        self.project_service.save_project_data(data)
+        # 不在这里写 completed：内部 _update_job 总是带 status='running'，
+        # 真正的 status='completed' 由 import_job_runner 在外层统一收尾。
+        logger.info(
+            "[import-structure] done project_id={} total={} failed={}",
+            project_id, total, state["failed"],
+        )
+        return data
+
+    @staticmethod
+    def _apply_import_structure(slide: Slide, payload: dict[str, Any]) -> None:
+        """把单页结构提取结果写回 slide，**绝不动 slide.prompt**。
+        缺字段就保持原值，避免 LLM 偶尔丢字段导致已有字段被空值覆盖。"""
+        if not payload:
+            return
+        title = payload.get("title")
+        if isinstance(title, str) and title.strip():
+            slide.title = title.strip()
+        for key in ("page_type", "page_role", "core_message", "layout", "color_rules", "text_hierarchy"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                setattr(slide, key, value.strip())
+        for key in ("modules", "visual_elements", "page_text"):
+            value = payload.get(key)
+            if isinstance(value, list) and value:
+                cleaned = [str(item).strip() for item in value if str(item).strip()]
+                if cleaned:
+                    setattr(slide, key, cleaned)
 
     async def generate_brief(self, data: ProjectData, async_client: httpx.AsyncClient | None = None) -> DeckBrief:
         payload = await self._call_json(
@@ -747,9 +963,22 @@ class GenerationService:
         record = self.session.get(ProjectRecord, project_id)
         if not record:
             raise HTTPException(status_code=404, detail="项目不存在")
-        # source_content 是用户原始上传的 markdown，对取标题最有信号量；
-        # 截到 3000 字符避免长素材吃 token，对项目命名这种短输出足够。
-        text = (record.source_content or "").strip()[:3000]
+        # 导入型项目没有原始 Markdown 素材，source_content 是占位文案；
+        # 改用前几页 slide.prompt 拼接，至少能给 LLM 足够信号。
+        if record.project_origin == "imported_prompts":
+            data = self.project_service.get_project_data_internal(project_id)
+            chunks: list[str] = []
+            for slide in data.slides[:3]:
+                body = (slide.prompt or "").strip()
+                if not body:
+                    continue
+                # 每页截到 1000 字符；3 页拼起来仍能控制总长度并保留各页特征。
+                chunks.append(f"第{slide.slide_no}页（{slide.title or '未命名'}）：{body[:1000]}")
+            text = "\n\n".join(chunks)
+        else:
+            # source_content 是用户原始上传的 markdown，对取标题最有信号量；
+            # 截到 3000 字符避免长素材吃 token，对项目命名这种短输出足够。
+            text = (record.source_content or "").strip()[:3000]
         if not text:
             raise HTTPException(status_code=400, detail="项目素材为空，无法生成标题")
         config = self._require_model_config()

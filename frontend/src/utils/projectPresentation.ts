@@ -8,6 +8,9 @@ export function projectStateLabel(state?: string | null): string {
     prompts_generated: '已生成提示词',
     consistency_checked: '已检查一致性',
     revised: '已修正',
+    prompts_imported: '已导入提示词',
+    import_structure_generating: '正在补全结构',
+    import_structure_generated: '结构已补全',
   };
   return labels[state ?? ''] ?? '处理中';
 }

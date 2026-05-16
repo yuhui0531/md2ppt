@@ -9,7 +9,10 @@ export class ApiError extends Error {
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has('Content-Type')) {
+  // FormData 走 multipart：必须让浏览器自己设带 boundary 的 Content-Type，
+  // 我们一手塞 application/json 反而会把上传请求拍碎。
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
+  if (init.body && !isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
   const response = await fetch(path, {

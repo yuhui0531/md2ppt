@@ -6,6 +6,7 @@ import {
   generateProject,
   getActiveJob,
   insertSlide,
+  regenerateImportStructure,
   regenerateOutline,
   regeneratePrompts,
   reviseInconsistentPrompts,
@@ -48,6 +49,7 @@ const expandSymbol = (expanded: boolean) => (
 const BUSY = {
   resume: 'resume',
   regenerateOutline: 'regenerate-outline',
+  regenerateImportStructure: 'regenerate-import-structure',
   regenerateAllPrompts: 'regenerate-all-prompts',
   regenerateCurrent: 'regenerate-current',
   checkConsistency: 'check-consistency',
@@ -117,7 +119,7 @@ export function WorkspacePage() {
       setJob(active);
 
       // Phase 2: 等任务结束。不管是哪种 kind 都要等（解锁按钮），
-      // 但只有 generation 类的成功/失败提示才会在这页显示，
+      // 但只有 generation / import_structure_generation 的成功/失败提示才会在这页显示，
       // image_generation 的提示交给生图页处理。
       try {
         const finalJob = await pollJobUntilFinished(active.job_id, (latest) => {
@@ -127,12 +129,12 @@ export function WorkspacePage() {
         const updated = await getProject(projectId);
         if (cancelled) return;
         setProject(updated);
-        if (active.kind === 'generation' && !finalJob.error) {
+        if ((active.kind === 'generation' || active.kind === 'import_structure_generation') && !finalJob.error) {
           setMessage({ kind: 'success', text: '已自动接续完成进行中的任务' });
         }
       } catch (error) {
         if (cancelled) return;
-        if (active.kind === 'generation') {
+        if (active.kind === 'generation' || active.kind === 'import_structure_generation') {
           setMessage({ kind: 'error', text: error instanceof Error ? error.message : '接续任务失败' });
         }
       }
@@ -144,8 +146,8 @@ export function WorkspacePage() {
 
   // 任务是否在跑（任意类型）：用于禁用所有会和后台并发写 ProjectData 的按钮。
   const jobRunning = job?.status === 'running';
-  // 当前页只接管 PPT 生成进度的展示；其它类型的任务在自己的页面显示。
-  const displayJob = job?.kind === 'generation' ? job : null;
+  // 当前页只接管 PPT 生成/结构补全进度的展示；其它类型的任务在自己的页面显示。
+  const displayJob = job && (job.kind === 'generation' || job.kind === 'import_structure_generation') ? job : null;
 
   // 选中页变化 / 外部更新该页 prompt 时同步草稿。注意此 effect 必须放在 early return 之前。
   // mount 时自动接续的任务轮询、resumeGeneration 等会在 actionsLocked 之外
@@ -224,8 +226,12 @@ export function WorkspacePage() {
   }
 
   const slide = project.slides[activeSlide];
-  const canResume = !['consistency_checked', 'revised'].includes(project.generation_state);
+  const isImported = project.project_origin === 'imported_prompts';
+  const canResume = !isImported && !['consistency_checked', 'revised'].includes(project.generation_state);
   const isDirty = slide ? draftPrompt !== slide.prompt : false;
+  const importJobRunning = jobRunning && job?.kind === 'import_structure_generation';
+  // 任意 job 在跑都禁止写 ProjectData——update_slide_prompt 是"读整份→改一项→整包写"，
+  // 与 worker 整包写之间会发生 lost update。在做到细粒度更新前，所有 mutation 都收紧。
   const mutationDisabled = busy !== null || jobRunning;
   // 任何会切换/重写 slide 的操作都不能在脏稿态下进行——否则 useEffect 重置
   // draftPrompt 会让用户的编辑无声丢失。检查一致性仅打分不动 prompt，例外。
@@ -308,6 +314,33 @@ export function WorkspacePage() {
     await refreshWith(() => regeneratePrompts(project.project_id), BUSY.regenerateAllPrompts, '已重新生成全部 prompt');
   }
 
+  async function handleRegenerateImportStructure() {
+    if (!project) return;
+    if (jobRunning) return;
+    const startedFor = project.project_id;
+    setBusy(BUSY.regenerateImportStructure);
+    setMessage(null);
+    setJob(null);
+    try {
+      const createdJob = await regenerateImportStructure(startedFor);
+      if (!stillScoped(startedFor)) return;
+      setJob(createdJob);
+      await pollJobUntilFinished(createdJob.job_id, (latest) => {
+        if (stillScoped(startedFor)) setJob(latest);
+      });
+      if (!stillScoped(startedFor)) return;
+      const updated = await getProject(startedFor);
+      if (!stillScoped(startedFor)) return;
+      setProject(updated);
+      setMessage({ kind: 'success', text: '页面结构已重新解析' });
+    } catch (error) {
+      if (!stillScoped(startedFor)) return;
+      setMessage({ kind: 'error', text: error instanceof Error ? error.message : '重新解析页面结构失败' });
+    } finally {
+      if (stillScoped(startedFor)) setBusy(null);
+    }
+  }
+
   const insertModalTitle = insertModal.mode === 'first'
     ? '新增第一页'
     : insertModal.mode === 'append'
@@ -343,38 +376,59 @@ export function WorkspacePage() {
                 {jobRunning ? '任务执行中…' : '继续生成'}
               </Button>
             )}
-            <Popconfirm
-              title="重新生成整份大纲"
-              description="会按推荐页数让大模型重写所有页，丢弃当前的手动编辑（含新增/删除）。确定继续？"
-              okText="确定重生成"
-              cancelText="取消"
-              onConfirm={handleRegenerateOutline}
-              disabled={actionsLocked}
-            >
-              <Button
-                icon={<ReloadOutlined />}
+            {isImported ? (
+              <Popconfirm
+                title="重新解析页面结构"
+                description="会基于当前 prompt 重新提取结构化字段（页面类型、版式建议、核心信息等），不会改写 prompt 正文。已有的一致性检查报告会被清空，下次进入生图前会重新检查。"
+                okText="确定重新解析"
+                cancelText="取消"
+                onConfirm={handleRegenerateImportStructure}
                 disabled={actionsLocked}
-                loading={busy === BUSY.regenerateOutline}
               >
-                重新生成大纲
-              </Button>
-            </Popconfirm>
-            <Popconfirm
-              title="重新生成全部 prompt"
-              description="会让大模型按当前大纲重写所有页的 prompt，覆盖你手动编辑过的 prompt。确定继续？"
-              okText="确定重生成"
-              cancelText="取消"
-              onConfirm={handleRegenerateAllPrompts}
-              disabled={actionsLocked}
-            >
-              <Button
-                icon={<SyncOutlined />}
-                disabled={actionsLocked}
-                loading={busy === BUSY.regenerateAllPrompts}
-              >
-                重新生成全部 prompt
-              </Button>
-            </Popconfirm>
+                <Button
+                  icon={<ReloadOutlined />}
+                  disabled={actionsLocked}
+                  loading={busy === BUSY.regenerateImportStructure || importJobRunning}
+                >
+                  {importJobRunning ? '结构补全中…' : '重新解析页面结构'}
+                </Button>
+              </Popconfirm>
+            ) : (
+              <>
+                <Popconfirm
+                  title="重新生成整份大纲"
+                  description="会按推荐页数让大模型重写所有页，丢弃当前的手动编辑（含新增/删除）。确定继续？"
+                  okText="确定重生成"
+                  cancelText="取消"
+                  onConfirm={handleRegenerateOutline}
+                  disabled={actionsLocked}
+                >
+                  <Button
+                    icon={<ReloadOutlined />}
+                    disabled={actionsLocked}
+                    loading={busy === BUSY.regenerateOutline}
+                  >
+                    重新生成大纲
+                  </Button>
+                </Popconfirm>
+                <Popconfirm
+                  title="重新生成全部 prompt"
+                  description="会让大模型按当前大纲重写所有页的 prompt，覆盖你手动编辑过的 prompt。确定继续？"
+                  okText="确定重生成"
+                  cancelText="取消"
+                  onConfirm={handleRegenerateAllPrompts}
+                  disabled={actionsLocked}
+                >
+                  <Button
+                    icon={<SyncOutlined />}
+                    disabled={actionsLocked}
+                    loading={busy === BUSY.regenerateAllPrompts}
+                  >
+                    重新生成全部 prompt
+                  </Button>
+                </Popconfirm>
+              </>
+            )}
             {(() => {
               const hasImages = project.slides.some((s) => s.image_url);
               const navDisabled = busy !== null || jobRunning;
@@ -400,9 +454,18 @@ export function WorkspacePage() {
         <Alert message={message.text} type={message.kind === 'error' ? 'error' : (message.kind === 'success' ? 'success' : 'info')} showIcon />
       )}
       <JobProgress job={displayJob} />
+      {isImported && importJobRunning && (
+        <Alert
+          type="info"
+          showIcon
+          message="正在根据导入提示词补全页面结构与大纲信息，完成后即可使用完整精调能力。"
+          description="任务进行中工作台为只读：prompt 编辑、新增/删除页、一致性检查等会写数据的操作都需等任务结束后再用。任务通常 1 分钟内完成。"
+        />
+      )}
 
       {/* 素材结构 - collapsible, shows ALL sections when expanded */}
-      <Collapse
+      {!isImported && project.parsed_sections.length > 0 && (
+        <Collapse
         bordered={false}
         style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', background: '#fff' }}
         items={[{
@@ -432,6 +495,7 @@ export function WorkspacePage() {
           ),
         }]}
       />
+      )}
 
       {/* Main work area: page list | details/prompt | consistency, aligned at top */}
       <Row gutter={[24, 24]} align="stretch">
@@ -508,21 +572,23 @@ export function WorkspacePage() {
                       保存修改
                     </Button>
                     <Button
-                      disabled={!slide || mutationDisabled}
+                      disabled={!slide || busy !== null}
                       onClick={handleDiscardDraft}
                     >
                       撤销修改
                     </Button>
                   </>
                 )}
-                <Button
-                  icon={<SyncOutlined />}
-                  disabled={!slide || mutationDisabled || isDirty}
-                  loading={busy === BUSY.regenerateCurrent}
-                  onClick={() => refreshWith(() => regeneratePrompts(project.project_id, [slide!.slide_no]), BUSY.regenerateCurrent, '已重新生成当前页 prompt')}
-                >
-                  重生成当前页
-                </Button>
+                {!isImported && (
+                  <Button
+                    icon={<SyncOutlined />}
+                    disabled={!slide || mutationDisabled || isDirty}
+                    loading={busy === BUSY.regenerateCurrent}
+                    onClick={() => refreshWith(() => regeneratePrompts(project.project_id, [slide!.slide_no]), BUSY.regenerateCurrent, '已重新生成当前页 prompt')}
+                  >
+                    重生成当前页
+                  </Button>
+                )}
               </Space>
             </div>
 

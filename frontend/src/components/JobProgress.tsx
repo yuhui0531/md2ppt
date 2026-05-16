@@ -82,6 +82,11 @@ function stageLabel(stage?: string | null): string {
     prompts_generating: '生成逐页 Prompt',
     consistency_checking: '检查一致性',
     consistency_checked: '完成',
+    import_scanning: '扫描导入文件',
+    import_outline_extracting: '提取页面结构',
+    import_brief_generating: '汇总整体大纲',
+    import_structure_saving: '保存结构化结果',
+    completed: '完成',
     failed: '失败',
     cancelled: '已取消',
   };

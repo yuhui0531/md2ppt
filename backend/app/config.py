@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     max_gateway_response_bytes: int = 4_000_000
     image_generation_concurrency: int = Field(default=4, ge=1)
     image_progress_flush_interval_seconds: float = Field(default=1.0, ge=0.0)
+    import_structure_concurrency: int = Field(default=4, ge=1)
     text_cap_brief: int = Field(default=3072, ge=1)
     text_cap_source_slide_constraint: int = Field(default=512, ge=1)
     text_cap_slide_count: int = Field(default=1024, ge=1)

@@ -8,6 +8,9 @@ def _new_slide_id() -> str:
     return f"sld_{uuid4().hex[:12]}"
 
 
+ProjectOrigin = Literal["generated_markdown", "imported_prompts"]
+
+
 class ErrorResponse(BaseModel):
     detail: str
 
@@ -149,6 +152,7 @@ class ProjectSummary(BaseModel):
     source_language: str = "zh-CN"
     generation_state: str
     slide_count: int = 0
+    project_origin: ProjectOrigin = "generated_markdown"
     created_at: str
     updated_at: str
 
@@ -277,6 +281,7 @@ class ConsistencyReport(BaseModel):
 class ProjectData(BaseModel):
     schema_version: str = "1.0"
     project_id: str
+    project_origin: ProjectOrigin = "generated_markdown"
     source: dict[str, Any]
     generation_options: GenerationOptions
     parsed_sections: list[ParsedSection] = Field(default_factory=list)
@@ -307,6 +312,12 @@ class JobResponse(BaseModel):
     progress: float | None = None
     message: str | None = None
     error: str | None = None
+
+
+class ImportPromptsResponse(BaseModel):
+    project_id: str
+    generation_state: str
+    job: JobResponse
 
 
 class RegenerateOutlineRequest(BaseModel):

@@ -81,3 +81,9 @@ export async function deleteSlide(projectId: string, slideId: string): Promise<P
   });
   return response.project;
 }
+
+export function regenerateImportStructure(projectId: string): Promise<JobResponse> {
+  return api(`/api/projects/${projectId}/regenerate-import-structure`, {
+    method: 'POST',
+  });
+}

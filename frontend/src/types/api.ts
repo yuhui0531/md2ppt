@@ -1,5 +1,6 @@
 export type SlideCountMode = 'auto' | 'fixed' | 'range';
 export type ExportFormat = 'json' | 'markdown' | 'prompt_zip';
+export type ProjectOrigin = 'generated_markdown' | 'imported_prompts';
 
 export interface ModelInfo {
   id: string;
@@ -124,6 +125,7 @@ export interface ConsistencyReport {
 export interface ProjectData {
   schema_version: string;
   project_id: string;
+  project_origin?: ProjectOrigin;
   source: Record<string, unknown>;
   generation_options: GenerationOptions;
   parsed_sections: ParsedSection[];
@@ -143,6 +145,7 @@ export interface ProjectSummary {
   source_language: string;
   generation_state: string;
   slide_count: number;
+  project_origin?: ProjectOrigin;
   created_at: string;
   updated_at: string;
 }

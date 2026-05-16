@@ -6,10 +6,12 @@ import { StatusMessage } from '../components/StatusMessage';
 import type { ProjectSummary } from '../types/api';
 import { projectStateLabel } from '../utils/projectPresentation';
 
-import { Card, Col, Row, Typography, Button, Space, Statistic, List, Tag, Popconfirm, Input, Alert, Empty } from 'antd';
+import { Card, Col, Row, Typography, Button, Space, Statistic, List, Tag, Popconfirm, Input, Alert, Empty, Segmented } from 'antd';
 import { EditOutlined, DeleteOutlined, RightOutlined, ExportOutlined, ThunderboltOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
+
+type OriginFilter = 'all' | 'generated_markdown' | 'imported_prompts';
 
 export function ProjectsPage() {
   const navigate = useNavigate();
@@ -20,6 +22,7 @@ export function ProjectsPage() {
   const [configured, setConfigured] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
+  const [originFilter, setOriginFilter] = useState<OriginFilter>('all');
 
   useEffect(() => {
     loadPage();
@@ -40,11 +43,19 @@ export function ProjectsPage() {
 
   const stats = useMemo(() => {
     const total = projects.length;
-    const completed = projects.filter((item) => ['consistency_checked', 'revised'].includes(item.generation_state)).length;
+    // 导入型项目走完结构补全就算"已完成"；生成型项目走完一致性检查或修正才算。
+    const COMPLETED_STATES = new Set(['consistency_checked', 'revised', 'import_structure_generated']);
+    const completed = projects.filter((item) => COMPLETED_STATES.has(item.generation_state)).length;
     const inProgress = total - completed;
     const slides = projects.reduce((sum, item) => sum + item.slide_count, 0);
-    return { total, completed, inProgress, slides };
+    const imported = projects.filter((item) => item.project_origin === 'imported_prompts').length;
+    return { total, completed, inProgress, slides, imported };
   }, [projects]);
+
+  const filteredProjects = useMemo(() => {
+    if (originFilter === 'all') return projects;
+    return projects.filter((item) => (item.project_origin ?? 'generated_markdown') === originFilter);
+  }, [projects, originFilter]);
 
   function startRename(project: ProjectSummary) {
     setEditingProjectId(project.project_id);
@@ -110,10 +121,16 @@ export function ProjectsPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1440, margin: '0 auto' }}>
-      <div style={{ position: 'sticky', top: -24, zIndex: 10, background: '#f5f7fa', padding: '16px 0', marginTop: -16 }}>
-        <Text type="secondary" style={{ letterSpacing: 1, fontSize: 12, fontWeight: 600, textTransform: 'uppercase' }}>Control Room</Text>
-        <Title level={3} style={{ margin: '4px 0 8px' }}>项目管理</Title>
-        <Text type="secondary" style={{ fontSize: 15 }}>从历史记录进入任意项目，继续生成、回看大纲、校验一致性，或者直接导出。</Text>
+      <div style={{ position: 'sticky', top: -24, zIndex: 10, background: '#f5f7fa', padding: '16px 0', marginTop: -16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16 }}>
+        <div>
+          <Text type="secondary" style={{ letterSpacing: 1, fontSize: 12, fontWeight: 600, textTransform: 'uppercase' }}>Control Room</Text>
+          <Title level={3} style={{ margin: '4px 0 8px' }}>项目管理</Title>
+          <Text type="secondary" style={{ fontSize: 15 }}>从历史记录进入任意项目，继续生成、回看大纲、校验一致性，或者直接导出。</Text>
+        </div>
+        <Space>
+          <Button onClick={() => navigate('/projects/new')} type="primary">新建素材项目</Button>
+          <Button onClick={() => navigate('/projects/new?mode=import')}>导入提示词</Button>
+        </Space>
       </div>
 
       {!configured && (
@@ -156,20 +173,41 @@ export function ProjectsPage() {
       </Row>
 
       <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, gap: 16, flexWrap: 'wrap' }}>
           <div>
             <Title level={4} style={{ margin: 0 }}>历史项目</Title>
             <Text type="secondary">按最近更新时间排序，直接从这里进入工作台或审核页。</Text>
           </div>
-          <Tag color="blue" style={{ borderRadius: 12, padding: '4px 12px', border: 0, background: '#e6f4ff', color: '#1677ff' }}>
-            {projects.length} 个项目
-          </Tag>
+          <Space wrap>
+            <Segmented
+              value={originFilter}
+              onChange={(value) => setOriginFilter(value as OriginFilter)}
+              options={[
+                { label: `全部 (${stats.total})`, value: 'all' },
+                { label: `生成型 (${stats.total - stats.imported})`, value: 'generated_markdown' },
+                { label: `导入型 (${stats.imported})`, value: 'imported_prompts' },
+              ]}
+            />
+            <Tag color="blue" style={{ borderRadius: 12, padding: '4px 12px', border: 0, background: '#e6f4ff', color: '#1677ff' }}>
+              {filteredProjects.length} 个项目
+            </Tag>
+          </Space>
         </div>
 
         <List
           loading={busy}
-          dataSource={projects}
-          locale={{ emptyText: <Empty description="还没有项目记录" ><Button type="primary" onClick={() => navigate('/projects/new')}>去新建项目</Button></Empty> }}
+          dataSource={filteredProjects}
+          locale={{
+            emptyText: (
+              <Empty description={originFilter === 'all' ? '还没有项目记录' : '此筛选下没有项目'}>
+                {originFilter === 'imported_prompts' ? (
+                  <Button type="primary" onClick={() => navigate('/projects/new?mode=import')}>去导入提示词</Button>
+                ) : (
+                  <Button type="primary" onClick={() => navigate('/projects/new')}>去新建项目</Button>
+                )}
+              </Empty>
+            ),
+          }}
           renderItem={(project) => (
             <List.Item
               style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 12, marginBottom: 16, padding: '20px 24px', transition: 'all 0.3s' }}
@@ -210,6 +248,9 @@ export function ProjectsPage() {
                 )}
                 <Space size={[8, 8]} wrap>
                   <Tag bordered={false}>{projectStateLabel(project.generation_state)}</Tag>
+                  {project.project_origin === 'imported_prompts' && (
+                    <Tag bordered={false} color="purple">导入型</Tag>
+                  )}
                   <Text type="secondary" style={{ fontSize: 13 }}>{project.slide_count} 页</Text>
                   <Text type="secondary" style={{ fontSize: 13 }}>更新于 {formatDateTime(project.updated_at)}</Text>
                 </Space>

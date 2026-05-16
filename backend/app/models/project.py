@@ -14,6 +14,7 @@ class ProjectRecord(SQLModel, table=True):
     source_language: str = "zh-CN"
     source_content: str
     generation_state: str = "uploaded"
+    project_origin: str = Field(default="generated_markdown", index=True)
     data_json: str = Field(default="{}")
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

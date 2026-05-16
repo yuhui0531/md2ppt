@@ -52,6 +52,9 @@ class JobService:
         statement = select(JobRecord).where(JobRecord.project_id == project_id, JobRecord.status == "running")
         now = datetime.now(timezone.utc)
         dirty = False
+        # 记下要回退状态的导入项目：worker 进程被 kill / OOM 时 _revert_generation_state_if_stuck
+        # 没机会跑，会让项目卡在 import_structure_generating；sweep 路径要兜住这种情况。
+        imported_to_revert: list[str] = []
         for job in self.session.exec(statement):
             elapsed = (now - ensure_utc(job.updated_at)).total_seconds()
             if elapsed > JOB_TIMEOUT_SECONDS:
@@ -69,8 +72,16 @@ class JobService:
                 job.updated_at = now
                 self.session.add(job)
                 dirty = True
+                if job.kind == "import_structure_generation":
+                    imported_to_revert.append(job.project_id)
         if dirty:
             self.session.commit()
+        if imported_to_revert:
+            # 延迟 import 打破 JobService → ProjectService 的循环（ProjectService 不依赖 JobService）。
+            from app.services.project_service import ProjectService
+            ps = ProjectService(self.session)
+            for pid in imported_to_revert:
+                ps.revert_import_structure_state(pid)
 
     def update(self, job: JobRecord, *, stage: str, progress: float, message: str, status: str | None = None, error: str | None = None) -> None:
         job.stage = stage
