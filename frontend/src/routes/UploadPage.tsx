@@ -1,24 +1,20 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { createProject } from '../api/projects';
 import { generateProject } from '../api/generation';
 import { importPrompts } from '../api/imports';
+import { createProject } from '../api/projects';
 import { JobProgress } from '../components/JobProgress';
 import { MarkdownPreview } from '../components/MarkdownPreview';
 import type { GenerationOptions, JobResponse, SlideCountMode } from '../types/api';
 import { pollJobUntilFinished } from '../utils/jobPolling';
 
-import { Card, Col, Row, Typography, Input, Select, Button, Tabs, Form, Upload, message, Space, Alert, List, Tag } from 'antd';
 import {
-  ArrowRightOutlined,
-  CheckCircleOutlined,
-  ClockCircleOutlined,
   DeleteOutlined,
   FileMarkdownOutlined,
   FileZipOutlined,
-  InboxOutlined,
-  SafetyCertificateOutlined,
+  InboxOutlined
 } from '@ant-design/icons';
+import { Alert, Button, Card, Col, Form, Input, List, message, Row, Select, Space, Tabs, Tag, Typography, Upload } from 'antd';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
