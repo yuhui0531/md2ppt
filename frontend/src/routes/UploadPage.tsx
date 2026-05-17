@@ -9,7 +9,16 @@ import type { GenerationOptions, JobResponse, SlideCountMode } from '../types/ap
 import { pollJobUntilFinished } from '../utils/jobPolling';
 
 import { Card, Col, Row, Typography, Input, Select, Button, Tabs, Form, Upload, message, Space, Alert, List, Tag } from 'antd';
-import { InboxOutlined, FileMarkdownOutlined, FileZipOutlined, DeleteOutlined } from '@ant-design/icons';
+import {
+  ArrowRightOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  DeleteOutlined,
+  FileMarkdownOutlined,
+  FileZipOutlined,
+  InboxOutlined,
+  SafetyCertificateOutlined,
+} from '@ant-design/icons';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -221,7 +230,7 @@ function MarkdownEntryPanel(props: MarkdownEntryPanelProps) {
           <Space direction="vertical" size="large" style={{ display: 'flex' }}>
             <Card
               bordered={false}
-              style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+              style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
               bodyStyle={{ padding: 24 }}
             >
               <div style={{ marginBottom: 16 }}>
@@ -233,7 +242,7 @@ function MarkdownEntryPanel(props: MarkdownEntryPanelProps) {
                   accept=".md,.markdown,text/markdown,text/plain"
                   beforeUpload={handleUpload}
                   showUploadList={false}
-                  style={{ background: '#fafafa' }}
+                  style={{ background: '#fafafa', borderRadius: 0 }}
                 >
                   <p className="ant-upload-drag-icon">
                     <InboxOutlined style={{ color: '#1677ff' }} />
@@ -245,7 +254,7 @@ function MarkdownEntryPanel(props: MarkdownEntryPanelProps) {
 
             <Card
               bordered={false}
-              style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+              style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
               bodyStyle={{ padding: 24, display: 'flex', flexDirection: 'column' }}
             >
               <Tabs
@@ -266,7 +275,7 @@ function MarkdownEntryPanel(props: MarkdownEntryPanelProps) {
                   autoSize={{ minRows: 16 }}
                 />
               ) : (
-                <div style={{ minHeight: 400, border: '1px solid #d9d9d9', borderRadius: 8, padding: 16, overflow: 'auto', background: '#fafafa' }}>
+                <div style={{ minHeight: 400, border: '1px solid #d9d9d9', borderRadius: 0, padding: 16, overflow: 'auto', background: '#fafafa' }}>
                   <MarkdownPreview content={content} />
                 </div>
               )}
@@ -277,7 +286,7 @@ function MarkdownEntryPanel(props: MarkdownEntryPanelProps) {
         <Col xs={24} lg={10}>
           <Card
             bordered={false}
-            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: 24 }}
+            style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: 24 }}
             bodyStyle={{ padding: 24 }}
           >
             <div style={{ marginBottom: 16 }}>
@@ -369,6 +378,12 @@ function ImportPromptsPanel() {
     if (zipCount > 1) return { mode: 'zip', error: '一次只能上传一个 ZIP 文件' };
     return { mode: zipCount ? 'zip' : 'md', error: null };
   }, [files]);
+  const totalSize = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
+  const selectedModeLabel = validation.mode === 'zip'
+    ? 'ZIP 模式'
+    : validation.mode === 'md'
+      ? '多文件模式'
+      : '等待选择文件';
 
   function addFiles(incoming: File[]) {
     setStatusMsg(null);
@@ -425,50 +440,58 @@ function ImportPromptsPanel() {
   return (
     <Row gutter={24}>
       <Col xs={24} lg={14}>
-        <Card
-          bordered={false}
-          style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
-          bodyStyle={{ padding: 24 }}
-        >
-          <div style={{ marginBottom: 16 }}>
-            <Title level={4} style={{ margin: 0 }}>导入逐页提示词</Title>
-            <Text type="secondary">
-              支持上传一个 ZIP 或同时选择多个 .md 文件。系统会忽略 index.md、隐藏文件、目录与非 .md 文件，
-              ZIP 与多个 .md 不能混传。
-            </Text>
-          </div>
-          <Dragger
-            multiple
-            accept=".md,.zip"
-            beforeUpload={(file, fileList) => {
-              // antd 对每个文件单独调一次 beforeUpload；我们一次性接管：
-              // 第一次拿到完整 fileList 时入队，之后 batch 内的同事直接 return false 跳过。
-              if (fileList && fileList.length && fileList[0] === file) {
-                addFiles(fileList as File[]);
-              }
-              return false;
-            }}
-            showUploadList={false}
-            style={{ background: '#fafafa' }}
+        <Space direction="vertical" size="large" style={{ display: 'flex' }}>
+          <Card
+            bordered={false}
+            style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+            bodyStyle={{ padding: 24 }}
           >
-            <p className="ant-upload-drag-icon">
-              <InboxOutlined style={{ color: '#1677ff' }} />
-            </p>
-            <p className="ant-upload-text">点击或拖拽文件到此区域</p>
-            <p className="ant-upload-hint">可选：一个 .zip 或多个 .md（互斥）</p>
-          </Dragger>
+            <div style={{ marginBottom: 16 }}>
+              <Title level={4} style={{ margin: 0 }}>上传提示词文件</Title>
+              <Text type="secondary">支持上传一个 ZIP 压缩包或多份 Markdown 文件，系统将保留原文并在后台补齐结构字段。</Text>
+            </div>
+            <Form.Item label="提示词文件" layout="vertical" style={{ marginBottom: 0 }}>
+              <Dragger
+                multiple
+                accept=".md,.zip"
+                beforeUpload={(file, fileList) => {
+                  if (fileList && fileList.length && fileList[0] === file) {
+                    addFiles(fileList as File[]);
+                  }
+                  return false;
+                }}
+                showUploadList={false}
+                style={{ background: '#fafafa', borderRadius: 0 }}
+              >
+                <p className="ant-upload-drag-icon">
+                  <InboxOutlined style={{ color: '#1677ff' }} />
+                </p>
+                <p className="ant-upload-text">
+                  {files.length ? '继续添加文件' : '点击或拖拽文件到此区域'}
+                </p>
+              </Dragger>
+            </Form.Item>
+          </Card>
 
           {files.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <Space style={{ marginBottom: 8 }} wrap>
-                <Tag color="blue">已选择 {files.length} 个文件</Tag>
-                {!validation.error && validation.mode === 'zip' && <Tag color="purple">ZIP 模式</Tag>}
-                {!validation.error && validation.mode === 'md' && <Tag color="green">多文件模式</Tag>}
-                {validation.error && <Tag color="red">{validation.error}</Tag>}
-              </Space>
+            <Card
+              bordered={false}
+              style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+              bodyStyle={{ padding: 24 }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <Title level={4} style={{ margin: 0 }}>已选文件</Title>
+                  <Text type="secondary">共 {files.length} 个文件，总大小 {formatBytes(totalSize)}</Text>
+                </div>
+                {validation.error ? (
+                  <Tag color="error">{validation.error}</Tag>
+                ) : (
+                  <Tag color="processing">{selectedModeLabel}</Tag>
+                )}
+              </div>
               <List
                 size="small"
-                bordered
                 dataSource={files}
                 renderItem={(file) => (
                   <List.Item
@@ -482,50 +505,51 @@ function ImportPromptsPanel() {
                       />,
                     ]}
                   >
-                    {file.name.toLowerCase().endsWith('.zip')
-                      ? <FileZipOutlined style={{ marginRight: 8, color: '#722ed1' }} />
-                      : <FileMarkdownOutlined style={{ marginRight: 8, color: '#1677ff' }} />}
-                    <Text style={{ flex: 1 }}>{file.name}</Text>
-                    <Text type="secondary" style={{ fontSize: 12, marginLeft: 12 }}>
-                      {formatBytes(file.size)}
-                    </Text>
+                    <List.Item.Meta
+                      avatar={file.name.toLowerCase().endsWith('.zip') ? <FileZipOutlined style={{ fontSize: 24, color: '#1677ff' }} /> : <FileMarkdownOutlined style={{ fontSize: 24, color: '#1677ff' }} />}
+                      title={file.name}
+                      description={formatBytes(file.size)}
+                    />
                   </List.Item>
                 )}
               />
-            </div>
+            </Card>
           )}
-        </Card>
+        </Space>
       </Col>
 
       <Col xs={24} lg={10}>
         <Card
           bordered={false}
-          style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: 24 }}
-          bodyStyle={{ padding: 24 }}
+          style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: 24, height: '100%' }}
+          bodyStyle={{ padding: 24, display: 'flex', flexDirection: 'column', height: '100%' }}
         >
-          <Title level={4} style={{ margin: '0 0 8px' }}>导入后会发生什么</Title>
-          <Paragraph type="secondary" style={{ fontSize: 13 }}>
-            1. 立即创建一个「导入型」项目，每个 .md 文件直接落到对应 slide 的 prompt 字段。
-          </Paragraph>
-          <Paragraph type="secondary" style={{ fontSize: 13 }}>
-            2. 后台自动跑「结构补全 / 大纲提取」任务，补出 page_type、core_message、版式建议等。
-            <br />
-            过程中<strong>不会改写 prompt 正文</strong>。
-          </Paragraph>
-          <Paragraph type="secondary" style={{ fontSize: 13 }}>
-            3. 立即跳转到工作台，顶部能看到结构补全任务的进度条。任务进行中工作台为只读，通常 1 分钟内完成；之后即可逐页精修 prompt、新增删除页、一致性检查并出图。
-          </Paragraph>
+          <div style={{ marginBottom: 16, flex: 1 }}>
+            <Title level={4} style={{ margin: 0, marginBottom: 8 }}>导入说明</Title>
+            <Text type="secondary" style={{ lineHeight: 1.6, display: 'block', marginBottom: 24 }}>
+              导入已有提示词可跳过自动生成环节。系统会将提示词原样落位，并在后台自动补齐所需的结构信息。导入成功后，您将直接进入工作台进行精细调整。
+            </Text>
+
+            <div style={{ background: '#fafafa', padding: 16, border: '1px solid #f0f0f0', borderRadius: 0 }}>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>💡 格式要求与建议</Text>
+              <ul style={{ margin: 0, paddingLeft: 20, color: '#8c8c8c', fontSize: 13, lineHeight: 1.8 }}>
+                <li>建议按页码对文件命名（如 <Text code>01_封面.md</Text>），系统将按名称顺序解析。</li>
+                <li>如果文件较多，建议先打包为 <Text code>.zip</Text> 格式后整体上传。</li>
+                <li>除 Markdown 外的其他类型文件及隐藏文件会被自动过滤。</li>
+              </ul>
+            </div>
+          </div>
 
           {statusMsg && (
             <Alert
               type={statusMsg.kind === 'error' ? 'error' : (statusMsg.kind === 'success' ? 'success' : 'info')}
               message={statusMsg.text}
               showIcon
-              style={{ marginTop: 12 }}
+              style={{ marginTop: 16 }}
             />
           )}
 
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 24, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 24, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
             <Button
               type="primary"
               onClick={handleSubmit}
