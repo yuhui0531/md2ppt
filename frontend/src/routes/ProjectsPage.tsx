@@ -23,6 +23,8 @@ export function ProjectsPage() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const [originFilter, setOriginFilter] = useState<OriginFilter>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
     loadPage();
@@ -56,6 +58,17 @@ export function ProjectsPage() {
     if (originFilter === 'all') return projects;
     return projects.filter((item) => (item.project_origin ?? 'generated_markdown') === originFilter);
   }, [projects, originFilter]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [originFilter]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(filteredProjects.length / pageSize));
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [filteredProjects.length, pageSize, currentPage]);
 
   function startRename(project: ProjectSummary) {
     setEditingProjectId(project.project_id);
@@ -197,6 +210,22 @@ export function ProjectsPage() {
         <List
           loading={busy}
           dataSource={filteredProjects}
+          pagination={
+            filteredProjects.length > 0
+              ? {
+                  current: currentPage,
+                  pageSize,
+                  total: filteredProjects.length,
+                  showSizeChanger: false,
+                  showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${total} 个项目`,
+                  onChange: (page, size) => {
+                    setCurrentPage(page);
+                    setPageSize(size);
+                  },
+                  align: 'end',
+                }
+              : false
+          }
           locale={{
             emptyText: (
               <Empty description={originFilter === 'all' ? '还没有项目记录' : '此筛选下没有项目'}>
