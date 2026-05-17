@@ -15,7 +15,7 @@ export function StyleGuidePanel({ styleGuide }: StyleGuidePanelProps) {
   
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      <Paragraph style={{ fontSize: 15, background: '#f8fafc', padding: 16, borderRadius: 8, margin: 0 }}>
+      <Paragraph style={{ fontSize: 15, background: '#f8fafc', padding: 16, borderRadius: 0, margin: 0 }}>
         {styleGuide.visual_style}
       </Paragraph>
       
@@ -38,7 +38,7 @@ function TagList({ title, items, color }: { title: string; items: string[]; colo
       <Text type="secondary" strong style={{ display: 'block', marginBottom: 12 }}>{title}</Text>
       <Space wrap size={[0, 8]}>
         {items.map((item) => (
-          <Tag key={item} color={color} style={{ margin: '0 8px 0 0', padding: '2px 8px', fontSize: 13, borderRadius: 4, whiteSpace: 'normal', maxWidth: '100%', wordBreak: 'break-word' }}>
+          <Tag key={item} color={color} style={{ margin: '0 8px 0 0', padding: '2px 8px', fontSize: 13, borderRadius: 0, whiteSpace: 'normal', maxWidth: '100%', wordBreak: 'break-word' }}>
             {item}
           </Tag>
         ))}

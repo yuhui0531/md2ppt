@@ -37,7 +37,7 @@ export function JobProgress({ job }: JobProgressProps) {
     <Card
       bordered={false}
       className={`job-progress-card ${isRunning ? 'is-running' : ''}`}
-      style={{ borderRadius: 12, background: '#f8fafc', marginBottom: 24, border: '1px solid #e2e8f0' }}
+      style={{ borderRadius: 0, background: '#f8fafc', marginBottom: 24, border: '1px solid #e2e8f0' }}
       bodyStyle={{ padding: 20 }}
     >
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>

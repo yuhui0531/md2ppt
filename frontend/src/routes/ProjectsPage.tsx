@@ -160,32 +160,32 @@ export function ProjectsPage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={12} sm={12} md={6}>
-          <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+          <Card bordered={false} style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
             <Statistic title="项目总数" value={stats.total} />
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>历史项目与当前项目统一管理</Text>
           </Card>
         </Col>
         <Col xs={12} sm={12} md={6}>
-          <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+          <Card bordered={false} style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
             <Statistic title="进行中" value={stats.inProgress} />
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>仍可继续生成或调整</Text>
           </Card>
         </Col>
         <Col xs={12} sm={12} md={6}>
-          <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+          <Card bordered={false} style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
             <Statistic title="已完成审核" value={stats.completed} />
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>可直接进入审核与导出</Text>
           </Card>
         </Col>
         <Col xs={12} sm={12} md={6}>
-          <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+          <Card bordered={false} style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
             <Statistic title="累计页数" value={stats.slides} />
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>已生成页面总量</Text>
           </Card>
         </Col>
       </Row>
 
-      <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+      <Card bordered={false} style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, gap: 16, flexWrap: 'wrap' }}>
           <div>
             <Title level={4} style={{ margin: 0 }}>历史项目</Title>
@@ -201,7 +201,7 @@ export function ProjectsPage() {
                 { label: `导入型 (${stats.imported})`, value: 'imported_prompts' },
               ]}
             />
-            <Tag color="blue" style={{ borderRadius: 12, padding: '4px 12px', border: 0, background: '#e6f4ff', color: '#1677ff' }}>
+            <Tag color="blue" style={{ borderRadius: 0, padding: '4px 12px', border: 0, background: '#e6f4ff', color: '#1677ff' }}>
               {filteredProjects.length} 个项目
             </Tag>
           </Space>
@@ -239,7 +239,7 @@ export function ProjectsPage() {
           }}
           renderItem={(project) => (
             <List.Item
-              style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 12, marginBottom: 16, padding: '20px 24px', transition: 'all 0.3s' }}
+              style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 0, marginBottom: 16, padding: '20px 24px', transition: 'all 0.3s' }}
               className="project-list-item"
               actions={[
                 <Button type="text" icon={<EditOutlined />} onClick={() => startRename(project)} disabled={actionBusy !== null}>重命名</Button>,

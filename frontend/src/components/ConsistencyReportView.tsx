@@ -14,7 +14,7 @@ export function ConsistencyReportView({ report }: ConsistencyReportViewProps) {
   }
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Card bordered={false} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }} bodyStyle={{ padding: 16 }}>
+      <Card bordered={false} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 0 }} bodyStyle={{ padding: 16 }}>
         <Statistic 
           title="整体评分" 
           value={report.overall_score} 
@@ -39,7 +39,7 @@ export function ConsistencyReportView({ report }: ConsistencyReportViewProps) {
               <Text>风格一致。</Text>
             )
           }
-          style={{ borderRadius: 8 }}
+          style={{ borderRadius: 0 }}
         />
       ))}
     </Space>

@@ -69,7 +69,7 @@ export function ReviewExportPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1440, margin: '0 auto', paddingBottom: 40 }}>
-      <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: -24, zIndex: 10 }}>
+      <Card bordered={false} style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: -24, zIndex: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <Text type="secondary" style={{ textTransform: 'uppercase', fontSize: 12, fontWeight: 600, letterSpacing: 1 }}>Export Center</Text>
@@ -96,7 +96,7 @@ export function ReviewExportPage() {
           <Card
             title="总体规划"
             bordered={false}
-            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', height: '100%' }}
+            style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', height: '100%' }}
           >
             {project.deck_brief ? (
               <Paragraph style={{ fontSize: 15 }}>{project.deck_brief.narrative}</Paragraph>
@@ -105,7 +105,7 @@ export function ReviewExportPage() {
             )}
 
             {project.slide_count_plan && (
-              <div style={{ background: '#f8fafc', padding: '16px 20px', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ background: '#f8fafc', padding: '16px 20px', borderRadius: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
                   <Text type="secondary" style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>推荐页数</Text>
                   <Title level={3} style={{ margin: 0, color: '#1677ff' }}>{project.slide_count_plan.accepted_slide_count}</Title>
@@ -120,7 +120,7 @@ export function ReviewExportPage() {
           <Card 
             title="导出" 
             bordered={false} 
-            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', height: '100%' }}
+            style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', height: '100%' }}
           >
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               <Button
@@ -164,7 +164,7 @@ export function ReviewExportPage() {
           </Space>
         }
         bordered={false}
-        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+        style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
         bodyStyle={{ maxHeight: 640, overflowY: 'auto' }}
       >
         <Row gutter={[16, 16]}>
@@ -177,7 +177,7 @@ export function ReviewExportPage() {
                   size="small"
                   bordered
                   style={{
-                    borderRadius: 12,
+                    borderRadius: 0,
                     height: '100%',
                     borderColor: needsRevision ? '#ffccc7' : undefined,
                     background: needsRevision ? '#fff7f6' : undefined,
@@ -219,7 +219,7 @@ export function ReviewExportPage() {
                   </Button>
 
                   {consistency && consistency.issues.length > 0 && (
-                    <div style={{ marginTop: 12, padding: '8px 12px', background: '#fff2f0', border: '1px solid #ffd6d2', borderRadius: 8 }}>
+                    <div style={{ marginTop: 12, padding: '8px 12px', background: '#fff2f0', border: '1px solid #ffd6d2', borderRadius: 0 }}>
                       <Text strong style={{ fontSize: 12, color: '#cf1322', display: 'block', marginBottom: 4 }}>
                         一致性问题
                       </Text>
@@ -249,7 +249,7 @@ export function ReviewExportPage() {
           <Card
             title="统一视觉规范"
             bordered={false}
-            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
+            style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}
           >
             <StyleGuidePanel styleGuide={project.style_guide} />
           </Card>
@@ -274,7 +274,7 @@ export function ReviewExportPage() {
           const slide = project.slides.find((s) => s.slide_no === previewSlideNo);
           if (!slide) return null;
           return (
-            <div style={{ maxHeight: '60vh', overflowY: 'auto', background: '#f8fafc', padding: 16, borderRadius: 8 }}>
+            <div style={{ maxHeight: '60vh', overflowY: 'auto', background: '#f8fafc', padding: 16, borderRadius: 0 }}>
               <MarkdownPreview content={slide.prompt} />
             </div>
           );

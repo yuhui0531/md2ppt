@@ -359,7 +359,7 @@ export function WorkspacePage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1600, margin: '0 auto', paddingBottom: 40 }}>
-      <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: -24, zIndex: 10 }}>
+      <Card bordered={false} style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: -24, zIndex: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <Title level={3} style={{ margin: '0 0 8px' }}>项目工作台</Title>
@@ -467,7 +467,7 @@ export function WorkspacePage() {
       {!isImported && project.parsed_sections.length > 0 && (
         <Collapse
         bordered={false}
-        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', background: '#fff' }}
+        style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', background: '#fff' }}
         items={[{
           key: 'parsed-sections',
           label: (
@@ -480,7 +480,7 @@ export function WorkspacePage() {
             <Row gutter={[12, 12]}>
               {project.parsed_sections.map((section) => (
                 <Col key={section.id} xs={24} sm={12} md={8} lg={6}>
-                  <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0', height: '100%' }}>
+                  <div style={{ background: '#f8fafc', padding: 12, borderRadius: 0, border: '1px solid #e2e8f0', height: '100%' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                       <Tag color="cyan" style={{ margin: 0 }}>L{section.level}</Tag>
                       <Text strong ellipsis>{section.heading}</Text>
@@ -503,7 +503,7 @@ export function WorkspacePage() {
           <Card
             title={<><span style={{ marginRight: 8 }}>页数与大纲</span><Tag bordered={false}>共 {project.slides.length} 页</Tag></>}
             bordered={false}
-            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%', display: 'flex', flexDirection: 'column' }}
+            style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%', display: 'flex', flexDirection: 'column' }}
             bodyStyle={{ padding: 0, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 180px)', overflow: 'hidden' }}
           >
             {project.slide_count_plan && (
@@ -555,7 +555,7 @@ export function WorkspacePage() {
         <Col xs={24} lg={11} style={{ display: 'flex' }}>
           <Card
             bordered={false}
-            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%', display: 'flex', flexDirection: 'column' }}
+            style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%', display: 'flex', flexDirection: 'column' }}
             bodyStyle={{ padding: 24, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 180px)', overflow: 'hidden' }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12 }}>
@@ -608,7 +608,7 @@ export function WorkspacePage() {
               />
             </div>
 
-            <div style={{ flex: 1, minHeight: 520, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', padding: detailView === 'prompt' ? 0 : 16, overflow: 'auto' }}>
+            <div style={{ flex: 1, minHeight: 520, background: '#f8fafc', borderRadius: 0, border: '1px solid #e2e8f0', padding: detailView === 'prompt' ? 0 : 16, overflow: 'auto' }}>
               {detailView === 'prompt' && (
                 <TextArea
                   value={draftPrompt}
@@ -632,7 +632,7 @@ export function WorkspacePage() {
                     <Row gutter={[12, 12]}>
                       {slideMetaItems.map((item) => (
                         <Col key={item.label} xs={12} sm={8}>
-                          <div style={{ background: '#fff', padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                          <div style={{ background: '#fff', padding: '8px 12px', borderRadius: 0, border: '1px solid #e2e8f0' }}>
                             <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>{item.label}</Text>
                             <Text strong style={{ fontSize: 13 }}>{item.value}</Text>
                           </div>
@@ -683,7 +683,7 @@ export function WorkspacePage() {
           <Card
             title="风格一致性"
             bordered={false}
-            style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%', display: 'flex', flexDirection: 'column' }}
+            style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%', display: 'flex', flexDirection: 'column' }}
             bodyStyle={{ padding: 24, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 180px)', overflowY: 'auto' }}
           >
             <Space direction="vertical" style={{ width: '100%', marginBottom: 24 }}>
@@ -717,7 +717,7 @@ export function WorkspacePage() {
       <Card
         title="统一视觉规范"
         bordered={false}
-        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', marginTop: 8 }}
+        style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', marginTop: 8 }}
       >
         <StyleGuidePanel styleGuide={project.style_guide} />
       </Card>

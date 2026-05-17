@@ -363,7 +363,7 @@ export function ImageGenerationPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1440, margin: '0 auto' }}>
-      <Card bordered={false} style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: -24, zIndex: 10 }}>
+      <Card bordered={false} style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: -24, zIndex: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <Title level={3} style={{ margin: '0 0 8px' }}>批量生图</Title>
@@ -402,7 +402,7 @@ export function ImageGenerationPage() {
             <Card
               bordered={true}
               hoverable
-              style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...(selectedSlides.has(slide.slide_no) ? { borderColor: '#1677ff', boxShadow: '0 0 0 2px rgba(22,119,255,0.2)' } : {}) }}
+              style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 0, ...(selectedSlides.has(slide.slide_no) ? { borderColor: '#1677ff', boxShadow: '0 0 0 2px rgba(22,119,255,0.2)' } : {}) }}
               bodyStyle={{ padding: 16, flex: 1, display: 'flex', flexDirection: 'column' }}
               className="image-card"
             >
@@ -427,7 +427,7 @@ export function ImageGenerationPage() {
                 )}
               </div>
               
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#f5f5f5', borderRadius: 8, overflow: 'hidden', minHeight: 200, marginBottom: 16, position: 'relative' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#f5f5f5', borderRadius: 0, overflow: 'hidden', minHeight: 200, marginBottom: 16, position: 'relative' }}>
                 {slide.image_url && !generatingSlides.includes(slide.slide_no) ? (
                   <img
                     src={slide.image_url}

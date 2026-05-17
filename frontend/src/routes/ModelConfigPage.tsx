@@ -189,7 +189,7 @@ export function ModelConfigPage() {
       <Card
         title={<><ApiOutlined /> OpenAI-compatible 文本生成配置</>}
         bordered={false}
-        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', height: '100%' }}
+        style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', height: '100%' }}
       >
         <div style={{ marginBottom: 16 }}>
           <Text type="secondary">先获取模型列表，再做一次最小 JSON 生成测试，最后保存为默认配置。</Text>
@@ -254,7 +254,7 @@ export function ModelConfigPage() {
       <Card
         title={<><PictureOutlined /> 生图模型配置</>}
         bordered={false}
-        style={{ borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', height: '100%' }}
+        style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', height: '100%' }}
       >
         <div style={{ marginBottom: 16 }}>
           <Text type="secondary">配置 OpenAI-compatible 生图网关。填写 URL 和 Key 后获取模型列表，测试通过后保存。</Text>
