@@ -54,6 +54,7 @@ const BUSY = {
   regenerateCurrent: 'regenerate-current',
   checkConsistency: 'check-consistency',
   reviseInconsistent: 'revise-inconsistent',
+  reviseInconsistentAll: 'revise-inconsistent-all',
   savePrompt: 'save-prompt',
   insertSlide: 'insert-slide',
   deleteSlide: 'delete-slide',
@@ -238,12 +239,21 @@ export function WorkspacePage() {
   const actionsLocked = mutationDisabled || isDirty;
   // 当前页是否仍在一致性报告里被标为需要修正。未跑过检查、当前页已达标都返回 false，
   // 据此禁用「修正当前页」按钮，避免空转 LLM 调用。
+  // 阈值用项目当前设置而非报告快照，与「修正不一致」调用时传给后端的 threshold
+  // 保持一致——避免用户改阈值后前端 disabled 判断与后端实际过滤集合错位。
+  const consistencyThreshold = project.generation_options.consistency_threshold;
   const currentSlideReport = slide && project.consistency_report
     ? project.consistency_report.slides.find((item) => item.slide_no === slide.slide_no)
     : undefined;
   const currentSlideNeedsRevision = currentSlideReport
-    ? currentSlideReport.revision_needed || currentSlideReport.score < project.consistency_report!.threshold
+    ? currentSlideReport.revision_needed || currentSlideReport.score < consistencyThreshold
     : false;
+  // 全部待修正页数：批量按钮的 disabled 与 Popconfirm 文案都依赖它。
+  const inconsistentSlideCount = project.consistency_report
+    ? project.consistency_report.slides.filter(
+        (item) => item.revision_needed || item.score < consistencyThreshold,
+      ).length
+    : 0;
 
   function trySwitchActiveSlide(nextIndex: number) {
     if (nextIndex === activeSlide) return;
@@ -722,6 +732,31 @@ export function WorkspacePage() {
               >
                 修正当前页
               </Button>
+              <Popconfirm
+                title="修正全部不一致页"
+                description={`将对 ${inconsistentSlideCount} 个不达标页调用 LLM 改写 prompt，耗时可能较长。`}
+                okText="确定修正"
+                cancelText="取消"
+                disabled={actionsLocked || inconsistentSlideCount === 0}
+                onConfirm={() => refreshWith(
+                  () => reviseInconsistentPrompts(
+                    project.project_id,
+                    project.generation_options.consistency_threshold,
+                  ),
+                  BUSY.reviseInconsistentAll,
+                  `已尝试修正 ${inconsistentSlideCount} 个不一致页，结果以一致性报告为准`,
+                )}
+              >
+                <Button
+                  block
+                  type="primary"
+                  ghost
+                  disabled={actionsLocked || inconsistentSlideCount === 0}
+                  loading={busy === BUSY.reviseInconsistentAll}
+                >
+                  修正全部不一致{inconsistentSlideCount > 0 ? `（${inconsistentSlideCount}）` : ''}
+                </Button>
+              </Popconfirm>
             </Space>
 
             <ConsistencyReportView report={project.consistency_report} />
