@@ -807,11 +807,17 @@ export function WorkspacePage() {
                 okText="确定修正"
                 cancelText="取消"
                 disabled={actionsLocked || inconsistentSlideCount === 0}
-                onConfirm={() => runReviseJob(
-                  undefined,
-                  BUSY.reviseInconsistentAll,
-                  `已尝试修正 ${inconsistentSlideCount} 个不一致页，结果以一致性报告为准`,
-                )}
+                onConfirm={() => {
+                  // 不能 return runReviseJob 的 Promise：antd Popconfirm 看到
+                  // onConfirm 返回 Promise 会 await 它才关弹窗，而 runReviseJob
+                  // 要轮询整个 job 完成（几十秒）。fire-and-forget 让弹窗立即关，
+                  // 进度由 JobProgress 接管。
+                  void runReviseJob(
+                    undefined,
+                    BUSY.reviseInconsistentAll,
+                    `已尝试修正 ${inconsistentSlideCount} 个不一致页，结果以一致性报告为准`,
+                  );
+                }}
               >
                 <Button
                   block
