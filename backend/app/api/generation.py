@@ -236,7 +236,9 @@ async def revise_inconsistent_prompts(
     _assert_project_owner(session, project_id, user_id)
     # 同 check_consistency：修正不一致会重写 slides[i].prompt，与并发任务必然冲突。
     _assert_no_active_job(session, project_id)
-    updated = await GenerationService(session, user_id).revise_inconsistent_prompts(project_id, request.threshold)
+    updated = await GenerationService(session, user_id).revise_inconsistent_prompts(
+        project_id, request.threshold, request.max_rounds,
+    )
     return ProjectResponse(project=updated)
 
 

@@ -257,42 +257,96 @@ class GenerationService:
         self.project_service.save_project_data(data)
         return data
 
-    async def revise_inconsistent_prompts(self, project_id: str, threshold: float) -> ProjectData:
+    async def revise_inconsistent_prompts(
+            self,
+            project_id: str,
+            threshold: float,
+            max_rounds: int = 1,
+    ) -> ProjectData:
         data = self.project_service.get_project_data_internal(project_id)
         async with build_gateway_async_client() as async_client:
             if data.consistency_report is None:
                 data.consistency_report = await self.check_consistency(data, threshold, async_client=async_client)
-            inconsistent_numbers = {
-                slide.slide_no
+            # 与旧代码保持语义：全部达标短路直接 return，不写 DB。
+            if not any(
+                slide.revision_needed or slide.score < threshold
                 for slide in data.consistency_report.slides
-                if slide.revision_needed or slide.score < threshold
-            }
-            if not inconsistent_numbers:
+            ):
                 return data
-            payload = await self._call_json(
-                "修正不一致 prompt",
-                REVISE_PROMPT,
-                {
-                    "style_guide": data.style_guide.model_dump(mode="json") if data.style_guide else None,
-                    "consistency_report": data.consistency_report.model_dump(mode="json"),
-                    "slides": [slide.model_dump(mode="json") for slide in data.slides if
-                               slide.slide_no in inconsistent_numbers],
-                },
-                async_client=async_client,
-            )
-            revised = [Slide.model_validate(slide) for slide in payload.get("slides", [])]
-            by_no = {slide.slide_no: slide for slide in revised}
-            merged: list[Slide] = []
-            for original in data.slides:
-                replacement = by_no.get(original.slide_no)
-                if replacement is None:
-                    merged.append(original)
-                    continue
-                # 同 regenerate_prompts：LLM 不知道 Slide.id，需要把原 id 写回。
-                replacement.id = original.id
-                merged.append(replacement)
-            data.slides = merged
-            data.consistency_report = await self.check_consistency(data, threshold, async_client=async_client)
+
+            previous_overall = data.consistency_report.overall_score
+            for round_idx in range(1, max_rounds + 1):
+                inconsistent_numbers = {
+                    slide.slide_no
+                    for slide in data.consistency_report.slides
+                    if slide.revision_needed or slide.score < threshold
+                }
+                if not inconsistent_numbers:
+                    break
+                payload = await self._call_json(
+                    "修正不一致 prompt",
+                    REVISE_PROMPT,
+                    {
+                        "style_guide": data.style_guide.model_dump(mode="json") if data.style_guide else None,
+                        "consistency_report": data.consistency_report.model_dump(mode="json"),
+                        "slides": [
+                            self._consistency_slide_payload(slide)
+                            for slide in data.slides
+                            if slide.slide_no in inconsistent_numbers
+                        ],
+                    },
+                    async_client=async_client,
+                )
+                revised = [Slide.model_validate(slide) for slide in payload.get("slides", [])]
+                if not revised:
+                    # LLM 返回空 slides 数组——再循环也无意义，跳出避免空转。
+                    logger.warning(
+                        "[generation] revise round={} returned 0 slides project_id={}",
+                        round_idx, project_id,
+                    )
+                    break
+                # REVISE_PROMPT 已约束 LLM 不得新增/重排页面，这里再加守卫：只接受
+                # 本轮提交给 LLM 的不一致页面 slide_no，防 LLM 越界修正未要求的页面。
+                by_no = {
+                    slide.slide_no: slide
+                    for slide in revised
+                    if slide.slide_no in inconsistent_numbers
+                }
+                merged: list[Slide] = []
+                for original in data.slides:
+                    replacement = by_no.get(original.slide_no)
+                    if replacement is None:
+                        merged.append(original)
+                        continue
+                    # 同 regenerate_prompts：LLM 不知道 Slide.id，需要把原 id 写回。
+                    # 一致性 payload 已剥离 image_url，必须从 original 拷回，
+                    # 否则用户已生成的图会丢。
+                    replacement.id = original.id
+                    replacement.image_url = original.image_url
+                    merged.append(replacement)
+                data.slides = merged
+                data.consistency_report = await self.check_consistency(data, threshold, async_client=async_client)
+                new_overall = data.consistency_report.overall_score
+                remaining = sum(
+                    1 for slide in data.consistency_report.slides
+                    if slide.revision_needed or slide.score < threshold
+                )
+                logger.info(
+                    "[generation] revise round={}/{} overall_score {:.3f}->{:.3f} remaining={} project_id={}",
+                    round_idx, max_rounds, previous_overall, new_overall, remaining, project_id,
+                )
+                if remaining == 0:
+                    break
+                # 第二轮起若 overall 反而下降才跳出，避免烧 token。
+                # 用 `<` 而非 `<=`：当 overall 持平但 remaining 下降时（某页跨过
+                # threshold 而其它页未变化）这是真实进步，仍允许继续修。
+                if round_idx >= 2 and new_overall < previous_overall:
+                    logger.info(
+                        "[generation] revise stopping: no improvement at round={} project_id={}",
+                        round_idx, project_id,
+                    )
+                    break
+                previous_overall = new_overall
         # 同 check_consistency_for_project：imported 项目保留 import_structure_generated，
         # 避免污染生命周期标签。
         if data.project_origin != "imported_prompts":
@@ -628,7 +682,7 @@ class GenerationService:
             {
                 "threshold": threshold,
                 "style_guide": data.style_guide.model_dump(mode="json") if data.style_guide else None,
-                "slides": [slide.model_dump(mode="json") for slide in data.slides],
+                "slides": [self._consistency_slide_payload(slide) for slide in data.slides],
             },
             async_client=async_client,
         )
@@ -895,6 +949,20 @@ class GenerationService:
             "target_image_tool": data.generation_options.target_image_tool,
             "slides": [slide.model_dump(mode="json") for slide in slides],
         }
+
+    @staticmethod
+    def _consistency_slide_payload(slide: Slide) -> dict[str, Any]:
+        """送给一致性检查 / 修正一致性的 slide 视图。
+        剔除上次一致性检查写回的 style_consistency_score、style_issues、
+        revision_needed 三个字段——REVISE_PROMPT 要求保留所有非 prompt 字段，
+        带着旧分数会让 LLM 把它们原样复制回输出，自我锚定，导致下一轮
+        overall_score 看似没动。同时剔除 image_url（与一致性判断无关）和 id
+        （LLM 输出会被 default_factory 重新生成，调用方靠 slide_no 锚定）。"""
+        dumped = slide.model_dump(mode="json")
+        for key in ("id", "style_consistency_score", "style_issues",
+                    "revision_needed", "image_url"):
+            dumped.pop(key, None)
+        return dumped
 
     @staticmethod
     def _effective_max_tokens(stage: str, user_max_tokens: int | None) -> int:
