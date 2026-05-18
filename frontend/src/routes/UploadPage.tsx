@@ -517,23 +517,21 @@ function ImportPromptsPanel() {
       <Col xs={24} lg={10}>
         <Card
           bordered={false}
-          style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: 24, height: '100%' }}
-          bodyStyle={{ padding: 24, display: 'flex', flexDirection: 'column', height: '100%' }}
+          style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', position: 'sticky', top: 24 }}
+          bodyStyle={{ padding: 24 }}
         >
-          <div style={{ marginBottom: 16, flex: 1 }}>
-            <Title level={4} style={{ margin: 0, marginBottom: 8 }}>导入说明</Title>
-            <Text type="secondary" style={{ lineHeight: 1.6, display: 'block', marginBottom: 24 }}>
-              导入已有提示词可跳过自动生成环节。系统会将提示词原样落位，并在后台自动补齐所需的结构信息。导入成功后，您将直接进入工作台进行精细调整。
-            </Text>
+          <Title level={4} style={{ margin: 0, marginBottom: 8 }}>导入说明</Title>
+          <Text type="secondary" style={{ lineHeight: 1.6, display: 'block', marginBottom: 24 }}>
+            导入已有提示词可跳过自动生成环节。系统会将提示词原样落位，并在后台自动补齐所需的结构信息。导入成功后，您将直接进入工作台进行精细调整。
+          </Text>
 
-            <div style={{ background: '#fafafa', padding: 16, border: '1px solid #f0f0f0', borderRadius: 0 }}>
-              <Text strong style={{ display: 'block', marginBottom: 8 }}>💡 格式要求与建议</Text>
-              <ul style={{ margin: 0, paddingLeft: 20, color: '#8c8c8c', fontSize: 13, lineHeight: 1.8 }}>
-                <li>建议按页码对文件命名（如 <Text code>01_封面.md</Text>），系统将按名称顺序解析。</li>
-                <li>如果文件较多，建议先打包为 <Text code>.zip</Text> 格式后整体上传。</li>
-                <li>除 Markdown 外的其他类型文件及隐藏文件会被自动过滤。</li>
-              </ul>
-            </div>
+          <div style={{ background: '#fafafa', padding: 16, border: '1px solid #f0f0f0', borderRadius: 0 }}>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>💡 格式要求与建议</Text>
+            <ul style={{ margin: 0, paddingLeft: 20, color: '#8c8c8c', fontSize: 13, lineHeight: 1.8 }}>
+              <li>建议按页码对文件命名（如 <Text code>01_封面.md</Text>），系统将按名称顺序解析。</li>
+              <li>如果文件较多，建议先打包为 <Text code>.zip</Text> 格式后整体上传。</li>
+              <li>除 Markdown 外的其他类型文件及隐藏文件会被自动过滤。</li>
+            </ul>
           </div>
 
           {statusMsg && (
