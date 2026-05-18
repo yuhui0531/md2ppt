@@ -4,10 +4,10 @@ import { getModelConfig } from '../api/modelConfig';
 import { deleteProject, listProjects, renameProject, suggestProjectTitle } from '../api/projects';
 import { StatusMessage } from '../components/StatusMessage';
 import type { ProjectSummary } from '../types/api';
-import { projectStateLabel } from '../utils/projectPresentation';
+import { projectHasActiveJob, projectProgress, projectStateLabel } from '../utils/projectPresentation';
 
-import { Card, Col, Row, Typography, Button, Space, Statistic, List, Tag, Popconfirm, Input, Alert, Empty, Segmented } from 'antd';
-import { EditOutlined, DeleteOutlined, RightOutlined, ExportOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { Card, Col, Row, Typography, Button, Space, Statistic, List, Tag, Popconfirm, Input, Alert, Empty, Segmented, Steps } from 'antd';
+import { EditOutlined, DeleteOutlined, RightOutlined, ExportOutlined, ThunderboltOutlined, LoadingOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
@@ -30,6 +30,15 @@ export function ProjectsPage() {
     loadPage();
   }, []);
 
+  // 任意项目有活跃 job 时每 5s 静默 reload 一次列表；无 job 时停止轮询。
+  // 用 silentReload 而非 loadPage：避免触发 busy=true 让 <List loading> 闪烁。
+  useEffect(() => {
+    const hasActive = projects.some(projectHasActiveJob);
+    if (!hasActive) return;
+    const timer = setInterval(() => { silentReload(); }, 5000);
+    return () => clearInterval(timer);
+  }, [projects]);
+
   async function loadPage() {
     setBusy(true);
     try {
@@ -40,6 +49,15 @@ export function ProjectsPage() {
       setMessage({ kind: 'error', text: error instanceof Error ? error.message : '加载项目列表失败' });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function silentReload() {
+    try {
+      const items = await listProjects();
+      setProjects(items);
+    } catch {
+      // 静默：轮询失败不打扰用户，下次轮询会再试。
     }
   }
 
@@ -256,7 +274,7 @@ export function ProjectsPage() {
                 <Button onClick={() => navigate(`/workspace/${project.project_id}`)} type='primary'>进入工作台</Button>,
               ]}
             >
-              <div style={{ width: '100%', maxWidth: '50%' }}>
+              <div style={{ width: '100%', maxWidth: '60%' }}>
                 {editingProjectId === project.project_id ? (
                   <Space.Compact style={{ width: '100%' }}>
                     <Input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="输入项目名称" onPressEnter={() => handleRename(project.project_id)} />
@@ -273,13 +291,24 @@ export function ProjectsPage() {
                     <Button onClick={cancelRename}>取消</Button>
                   </Space.Compact>
                 ) : (
-                  <Title level={5} style={{ margin: '0 0 8px 0' }}>{project.title}</Title>
+                  <Title level={5} style={{ margin: '0 0 12px 0' }}>{project.title}</Title>
                 )}
+                <Steps
+                  size="small"
+                  current={-1}
+                  items={projectProgress(project).map((step) => ({
+                    title: step.title,
+                    status: step.status,
+                    description: step.description,
+                    icon: step.status === 'process' ? <LoadingOutlined /> : undefined,
+                  }))}
+                  style={{ marginBottom: 12 }}
+                />
                 <Space size={[8, 8]} wrap>
-                  <Tag bordered={false}>{projectStateLabel(project.generation_state)}</Tag>
                   {project.project_origin === 'imported_prompts' && (
                     <Tag bordered={false} color="purple">导入型</Tag>
                   )}
+                  <Tag bordered={false}>{projectStateLabel(project.generation_state)}</Tag>
                   <Text type="secondary" style={{ fontSize: 13 }}>{project.slide_count} 页</Text>
                   <Text type="secondary" style={{ fontSize: 13 }}>更新于 {formatDateTime(project.updated_at)}</Text>
                 </Space>

@@ -10,7 +10,7 @@ from sqlmodel import Session, delete, select
 from app.core.image_storage import project_image_dir, resolve_local_path
 from app.models.job import JobRecord
 from app.models.project import ParsedSectionRecord, ProjectRecord
-from app.models.schemas import CreateProjectRequest, ParsedSection, ProjectData, ProjectSummary, Slide
+from app.models.schemas import CreateProjectRequest, JobResponse, ParsedSection, ProjectData, ProjectSummary, Slide
 from app.services.markdown_parser import MarkdownParserService
 from app.services.template_service import TemplateService
 
@@ -85,6 +85,22 @@ class ProjectService:
             .order_by(ProjectRecord.updated_at.desc())
         )
         records = list(self.session.exec(stmt))
+        if not records:
+            return []
+        # 一次性查所有运行中 job，按 project_id 分组取最新一条。同一 project_id
+        # 不会同时有两条 running（API 层 _assert_no_active_job 守住），按更新时间
+        # 倒序遍历用 setdefault 保住「最新」语义。避免 N+1 单查。
+        project_ids = [record.id for record in records]
+        job_stmt = (
+            select(JobRecord)
+            .where(JobRecord.project_id.in_(project_ids))
+            .where(JobRecord.status == "running")
+            .order_by(JobRecord.updated_at.desc())
+        )
+        active_by_project: dict[str, JobRecord] = {}
+        for job in self.session.exec(job_stmt):
+            active_by_project.setdefault(job.project_id, job)
+
         summaries: list[ProjectSummary] = []
         for record in records:
             try:
@@ -95,6 +111,26 @@ class ProjectService:
             if data:
                 self._ensure_record_title(record, data)
             slides = payload.get("slides", [])
+            slide_count = len(slides) if isinstance(slides, list) else 0
+            # images_ready：所有 slide 都有非空 image_url 才算生图完成。前端 Steps
+            # 据此点亮「生图」步的 finish 终态；为空项目（slide_count=0）显式不算
+            # 完成，避免误显「全部完成」给空骨架。
+            images_ready = (
+                slide_count > 0
+                and isinstance(slides, list)
+                and all(isinstance(s, dict) and s.get("image_url") for s in slides)
+            )
+            active_job_record = active_by_project.get(record.id)
+            active_job = JobResponse(
+                job_id=active_job_record.id,
+                project_id=active_job_record.project_id,
+                kind=active_job_record.kind,
+                status=active_job_record.status,
+                stage=active_job_record.stage,
+                progress=active_job_record.progress,
+                message=active_job_record.message,
+                error=active_job_record.error,
+            ) if active_job_record else None
             summaries.append(
                 ProjectSummary(
                     project_id=record.id,
@@ -102,10 +138,12 @@ class ProjectService:
                     source_filename=record.source_filename,
                     source_language=record.source_language,
                     generation_state=record.generation_state,
-                    slide_count=len(slides) if isinstance(slides, list) else 0,
+                    slide_count=slide_count,
                     project_origin=record.project_origin or "generated_markdown",
                     created_at=record.created_at.isoformat(),
                     updated_at=record.updated_at.isoformat(),
+                    active_job=active_job,
+                    images_ready=images_ready,
                 )
             )
         return summaries

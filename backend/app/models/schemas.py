@@ -145,6 +145,17 @@ class CreateProjectResponse(BaseModel):
     generation_state: str
 
 
+class JobResponse(BaseModel):
+    job_id: str
+    project_id: str
+    kind: str = "generation"
+    status: str
+    stage: str | None = None
+    progress: float | None = None
+    message: str | None = None
+    error: str | None = None
+
+
 class ProjectSummary(BaseModel):
     project_id: str
     title: str
@@ -155,6 +166,15 @@ class ProjectSummary(BaseModel):
     project_origin: ProjectOrigin = "generated_markdown"
     created_at: str
     updated_at: str
+    # 项目当前是否有后台任务在跑（generation / import_structure_generation /
+    # image_generation）。列表页据此展示 loading 步骤 + 决定是否轮询；非 running
+    # 时为 None。
+    active_job: JobResponse | None = None
+    # 所有 slide 都有 image_url 即视为「已生成全部图片」。列表页 Steps 用它点亮
+    # 「生图」步的 finish 终态——image_generation job 跑完后 active_job 会变 None，
+    # 没有该字段就无法把生图步从 process 切到 finish，会让用户看到「生图刚跑完
+    # 又变成 wait」的错乱。
+    images_ready: bool = False
 
 
 class ProjectListResponse(BaseModel):
@@ -301,17 +321,6 @@ class ProjectResponse(BaseModel):
 
 class GenerateProjectRequest(BaseModel):
     mode: Literal["auto", "restart"] = "auto"
-
-
-class JobResponse(BaseModel):
-    job_id: str
-    project_id: str
-    kind: str = "generation"
-    status: str
-    stage: str | None = None
-    progress: float | None = None
-    message: str | None = None
-    error: str | None = None
 
 
 class ImportPromptsResponse(BaseModel):

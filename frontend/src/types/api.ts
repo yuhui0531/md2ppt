@@ -148,6 +148,8 @@ export interface ProjectSummary {
   project_origin?: ProjectOrigin;
   created_at: string;
   updated_at: string;
+  active_job?: JobResponse | null;
+  images_ready?: boolean;
 }
 
 export interface JobResponse {
