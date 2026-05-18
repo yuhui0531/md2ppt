@@ -236,6 +236,14 @@ export function WorkspacePage() {
   // 任何会切换/重写 slide 的操作都不能在脏稿态下进行——否则 useEffect 重置
   // draftPrompt 会让用户的编辑无声丢失。检查一致性仅打分不动 prompt，例外。
   const actionsLocked = mutationDisabled || isDirty;
+  // 当前页是否仍在一致性报告里被标为需要修正。未跑过检查、当前页已达标都返回 false，
+  // 据此禁用「修正当前页」按钮，避免空转 LLM 调用。
+  const currentSlideReport = slide && project.consistency_report
+    ? project.consistency_report.slides.find((item) => item.slide_no === slide.slide_no)
+    : undefined;
+  const currentSlideNeedsRevision = currentSlideReport
+    ? currentSlideReport.revision_needed || currentSlideReport.score < project.consistency_report!.threshold
+    : false;
 
   function trySwitchActiveSlide(nextIndex: number) {
     if (nextIndex === activeSlide) return;
@@ -700,11 +708,19 @@ export function WorkspacePage() {
                 block
                 type="primary"
                 ghost
-                disabled={actionsLocked}
+                disabled={actionsLocked || !slide || !currentSlideNeedsRevision}
                 loading={busy === BUSY.reviseInconsistent}
-                onClick={() => refreshWith(() => reviseInconsistentPrompts(project.project_id, project.generation_options.consistency_threshold), BUSY.reviseInconsistent, '不一致页面已修正')}
+                onClick={() => refreshWith(
+                  () => reviseInconsistentPrompts(
+                    project.project_id,
+                    project.generation_options.consistency_threshold,
+                    [slide!.slide_no],
+                  ),
+                  BUSY.reviseInconsistent,
+                  `第 ${slide!.slide_no} 页已修正`,
+                )}
               >
-                修正不一致
+                修正当前页
               </Button>
             </Space>
 

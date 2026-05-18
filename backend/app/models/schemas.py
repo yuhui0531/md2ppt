@@ -354,6 +354,9 @@ class CheckConsistencyRequest(BaseModel):
 class ReviseInconsistentPromptsRequest(BaseModel):
     threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     max_rounds: int = Field(default=2, ge=1, le=3)
+    # None = 自动选所有不达标页（preflight 与历史客户端语义）；
+    # 非空 list = 仅修这些 slide_no 与不达标集合的交集，供工作台按页修。
+    slide_numbers: list[int] | None = None
 
 
 class GenerateImagesRequest(BaseModel):

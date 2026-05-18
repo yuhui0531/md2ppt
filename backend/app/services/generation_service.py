@@ -262,6 +262,7 @@ class GenerationService:
             project_id: str,
             threshold: float,
             max_rounds: int = 1,
+            slide_numbers: list[int] | None = None,
     ) -> ProjectData:
         data = self.project_service.get_project_data_internal(project_id)
         async with build_gateway_async_client() as async_client:
@@ -274,6 +275,7 @@ class GenerationService:
             ):
                 return data
 
+            requested_numbers = set(slide_numbers) if slide_numbers is not None else None
             previous_overall = data.consistency_report.overall_score
             for round_idx in range(1, max_rounds + 1):
                 inconsistent_numbers = {
@@ -281,6 +283,10 @@ class GenerationService:
                     for slide in data.consistency_report.slides
                     if slide.revision_needed or slide.score < threshold
                 }
+                if requested_numbers is not None:
+                    # 工作台按页修：只与用户选定的页面取交集；用户选的页若已达标，
+                    # 交集为空 → 下面的 break 走短路（也是预期行为，前端按钮已禁用）。
+                    inconsistent_numbers &= requested_numbers
                 if not inconsistent_numbers:
                     break
                 payload = await self._call_json(

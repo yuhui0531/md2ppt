@@ -47,10 +47,14 @@ export async function checkConsistency(projectId: string, threshold: number): Pr
   return response.project;
 }
 
-export async function reviseInconsistentPrompts(projectId: string, threshold: number): Promise<ProjectData> {
+export async function reviseInconsistentPrompts(
+  projectId: string,
+  threshold: number,
+  slideNumbers?: number[],
+): Promise<ProjectData> {
   const response = await api<{ project: ProjectData }>(`/api/projects/${projectId}/revise-inconsistent-prompts`, {
     method: 'POST',
-    body: JSON.stringify({ threshold, max_rounds: 2 }),
+    body: JSON.stringify({ threshold, max_rounds: 2, slide_numbers: slideNumbers ?? null }),
   });
   return response.project;
 }
