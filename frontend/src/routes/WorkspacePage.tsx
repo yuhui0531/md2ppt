@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
+  cancelJob,
   checkConsistency,
   deleteSlide,
   generateProject,
@@ -147,8 +148,13 @@ export function WorkspacePage() {
 
   // 任务是否在跑（任意类型）：用于禁用所有会和后台并发写 ProjectData 的按钮。
   const jobRunning = job?.status === 'running';
-  // 当前页只接管 PPT 生成/结构补全进度的展示；其它类型的任务在自己的页面显示。
-  const displayJob = job && (job.kind === 'generation' || job.kind === 'import_structure_generation') ? job : null;
+  // 当前页只接管 PPT 生成 / 结构补全 / 风格修正进度的展示；其它类型的任务在自己的页面显示。
+  // revise_inconsistent 从工作台触发，进度条 + 取消按钮都挂在这里。
+  const displayJob = job && (
+    job.kind === 'generation'
+    || job.kind === 'import_structure_generation'
+    || job.kind === 'revise_inconsistent'
+  ) ? job : null;
 
   // 选中页变化 / 外部更新该页 prompt 时同步草稿。注意此 effect 必须放在 early return 之前。
   // mount 时自动接续的任务轮询、resumeGeneration 等会在 actionsLocked 之外
@@ -188,6 +194,52 @@ export function WorkspacePage() {
     } catch (error) {
       if (!stillScoped(startedFor)) return;
       setMessage({ kind: 'error', text: error instanceof Error ? error.message : '操作失败' });
+    } finally {
+      if (stillScoped(startedFor)) setBusy(null);
+    }
+  }
+
+  // 修正不一致已转 job：拿到 JobResponse 后挂进度条 + 轮询，完成后拉一次 project。
+  // 失败 / 取消的消息按 final job 状态分支，避免轮询里抛错盖掉真实结果。
+  async function runReviseJob(slideNumbers: number[] | undefined, busyKey: string, successText: string) {
+    if (!project) return;
+    const startedFor = project.project_id;
+    setBusy(busyKey);
+    setMessage(null);
+    setJob(null);
+    try {
+      const createdJob = await reviseInconsistentPrompts(
+        startedFor,
+        project.generation_options.consistency_threshold,
+        slideNumbers,
+      );
+      if (!stillScoped(startedFor)) return;
+      setJob(createdJob);
+      const finalJob = await pollJobUntilFinished(createdJob.job_id, (latest) => {
+        if (stillScoped(startedFor)) setJob(latest);
+      });
+      if (!stillScoped(startedFor)) return;
+      const updated = await getProject(startedFor);
+      if (!stillScoped(startedFor)) return;
+      setProject(updated);
+      if (finalJob.status === 'cancelled') {
+        setMessage({
+          kind: 'info',
+          text: '已取消修正；已完成轮次的 prompt 修改已保留，但一致性报告可能未刷新到最新状态。',
+        });
+      } else if (finalJob.status === 'failed') {
+        setMessage({ kind: 'error', text: finalJob.error || '修正失败' });
+      } else if ((finalJob.stage ?? '').endsWith('no_inconsistent')) {
+        // 短路 return：service emit 「全部页面已达标，无需修正」。前端单独走分支
+        // 避免显示用户传入的「已尝试修正 N 个不一致页」——race 下 N 来自陈旧的快照。
+        // 用 endsWith 兼容 preflight stage_prefix 变体。
+        setMessage({ kind: 'info', text: '全部页面已达标，无需修正。' });
+      } else {
+        setMessage({ kind: 'success', text: successText });
+      }
+    } catch (error) {
+      if (!stillScoped(startedFor)) return;
+      setMessage({ kind: 'error', text: error instanceof Error ? error.message : '修正失败' });
     } finally {
       if (stillScoped(startedFor)) setBusy(null);
     }
@@ -471,7 +523,28 @@ export function WorkspacePage() {
       {message && (
         <Alert message={message.text} type={message.kind === 'error' ? 'error' : (message.kind === 'success' ? 'success' : 'info')} showIcon />
       )}
-      <JobProgress job={displayJob} />
+      <JobProgress
+        job={displayJob}
+        onCancel={
+          // 只对 revise_inconsistent job 暴露取消按钮。其它 job kind（生图 / 大纲生成 /
+          // 结构补全）目前没有 UI 入口取消，且生成 job 中途取消会留半生不熟的 generation_state，
+          // 暂不一并改造。
+          displayJob?.kind === 'revise_inconsistent' && displayJob.status === 'running'
+            ? async () => {
+                try {
+                  await cancelJob(displayJob.job_id);
+                } catch (error) {
+                  // 取消请求失败不阻断轮询——下次拉到真实 status 会反映出来。
+                  // 仅给用户一个提示，避免「点了没反应」的困惑。
+                  setMessage({
+                    kind: 'error',
+                    text: error instanceof Error ? error.message : '取消请求失败，请稍后再试',
+                  });
+                }
+              }
+            : undefined
+        }
+      />
       {isImported && importJobRunning && (
         <Alert
           type="info"
@@ -720,12 +793,8 @@ export function WorkspacePage() {
                 ghost
                 disabled={actionsLocked || !slide || !currentSlideNeedsRevision}
                 loading={busy === BUSY.reviseInconsistent}
-                onClick={() => refreshWith(
-                  () => reviseInconsistentPrompts(
-                    project.project_id,
-                    project.generation_options.consistency_threshold,
-                    [slide!.slide_no],
-                  ),
+                onClick={() => runReviseJob(
+                  [slide!.slide_no],
                   BUSY.reviseInconsistent,
                   `第 ${slide!.slide_no} 页已修正`,
                 )}
@@ -738,11 +807,8 @@ export function WorkspacePage() {
                 okText="确定修正"
                 cancelText="取消"
                 disabled={actionsLocked || inconsistentSlideCount === 0}
-                onConfirm={() => refreshWith(
-                  () => reviseInconsistentPrompts(
-                    project.project_id,
-                    project.generation_options.consistency_threshold,
-                  ),
+                onConfirm={() => runReviseJob(
+                  undefined,
                   BUSY.reviseInconsistentAll,
                   `已尝试修正 ${inconsistentSlideCount} 个不一致页，结果以一致性报告为准`,
                 )}

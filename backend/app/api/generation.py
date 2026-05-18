@@ -226,20 +226,95 @@ async def check_consistency(
     return ProjectResponse(project=updated)
 
 
-@router.post("/api/projects/{project_id}/revise-inconsistent-prompts", response_model=ProjectResponse)
+@router.post("/api/projects/{project_id}/revise-inconsistent-prompts", response_model=JobResponse)
 async def revise_inconsistent_prompts(
     project_id: str,
     request: ReviseInconsistentPromptsRequest,
     session: Session = Depends(get_session),
     user_id: int = Depends(get_current_user_id),
-) -> ProjectResponse:
+) -> JobResponse:
     _assert_project_owner(session, project_id, user_id)
-    # 同 check_consistency：修正不一致会重写 slides[i].prompt，与并发任务必然冲突。
-    _assert_no_active_job(session, project_id)
-    updated = await GenerationService(session, user_id).revise_inconsistent_prompts(
-        project_id, request.threshold, request.max_rounds, request.slide_numbers,
+    job_service = JobService(session)
+    # 修正不一致会重写 slides[i].prompt，与并发任务必然冲突。
+    if job_service.has_active_job(project_id):
+        logger.warning(
+            "[revise-job] create rejected project_id={} user_id={} reason=active_job",
+            project_id, user_id,
+        )
+        raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
+    job = job_service.create_job(project_id, kind="revise_inconsistent")
+    logger.info(
+        "[revise-job] created job_id={} project_id={} user_id={} threshold={} max_rounds={} slide_numbers={}",
+        job.id, project_id, user_id, request.threshold, request.max_rounds, request.slide_numbers,
     )
-    return ProjectResponse(project=updated)
+    job_service.update(job, stage="queued", progress=0.0, message="修正任务已创建", status="running")
+    asyncio.create_task(_run_revise_job(
+        job.id, project_id, request.threshold, request.max_rounds, request.slide_numbers, user_id,
+    ))
+    return JobResponse(
+        job_id=job.id,
+        project_id=job.project_id,
+        kind=job.kind,
+        status=job.status,
+        stage=job.stage,
+        progress=job.progress,
+        message=job.message,
+        error=job.error,
+    )
+
+
+async def _run_revise_job(
+    job_id: str,
+    project_id: str,
+    threshold: float,
+    max_rounds: int,
+    slide_numbers: list[int] | None,
+    user_id: int,
+) -> None:
+    with Session(engine) as session:
+        job_service = JobService(session)
+        job = job_service.get_job(job_id)
+        try:
+            await GenerationService(session, user_id).revise_inconsistent_prompts(
+                project_id, threshold, max_rounds, slide_numbers,
+                job_service=job_service, job=job,
+            )
+            # 与生图 / 大纲生成 job 对齐：内部 _update_job 已多次重写 job 行；这里再读一次
+            # status，避免 cancelled 路径下覆盖回 completed。短路 return 时 service 已
+            # emit "no_inconsistent" 阶段，message 准确反映「无需修正」；不要再覆盖。
+            # 用 endswith 而非 ==：service 可能加 stage_prefix（preflight 路径），
+            # 这条 worker 当前不走 preflight，但用 endswith 让契约更稳。
+            session.refresh(job)
+            stage_is_no_inconsistent = (job.stage or "").endswith("no_inconsistent")
+            if job.status != "cancelled" and not stage_is_no_inconsistent:
+                job_service.update(job, stage="completed", progress=1.0,
+                                   message="修正完成", status="completed")
+            elif stage_is_no_inconsistent:
+                # 让前端轮询拿到「completed」状态结束轮询，但保留 service 写入的语义文案。
+                job_service.update(job, stage=job.stage, progress=1.0,
+                                   message=job.message, status="completed")
+        except HTTPException as exc:
+            if exc.status_code == 499:
+                logger.info("[revise-job] cancelled job_id={} project_id={} user_id={}", job_id, project_id, user_id)
+                session.refresh(job)
+                if job.status != "cancelled":
+                    job_service.update(job, stage="cancelled", progress=job.progress,
+                                       message="任务已取消", status="cancelled")
+                return
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            logger.exception(
+                "[revise-job] failed job_id={} project_id={} user_id={} stage={} status_code={} detail={}",
+                job_id, project_id, user_id, job.stage, exc.status_code, detail,
+            )
+            job_service.update(job, stage="failed", progress=job.progress,
+                               message="修正失败", status="failed", error=detail)
+        except Exception as exc:
+            logger.exception(
+                "[revise-job] failed job_id={} project_id={} user_id={} stage={} error={}",
+                job_id, project_id, user_id, job.stage, exc,
+            )
+            job_service.update(job, stage="failed", progress=job.progress,
+                               message="修正失败", status="failed", error=str(exc))
 
 
 @router.post("/api/projects/{project_id}/regenerate-import-structure", response_model=JobResponse)
@@ -423,7 +498,14 @@ async def _ensure_prompts_checked_before_image_generation(
         return
 
     job_service.update(job, stage="revising_prompts", progress=0.0, message="生图前自动修正不一致 prompt", status="running")
-    data = await service.revise_inconsistent_prompts(project_id, threshold)
+    data = await service.revise_inconsistent_prompts(
+        project_id, threshold,
+        job_service=job_service, job=job,
+        stage_prefix="preflight_",
+        # 生图 job 整条进度条的前 20% 留给 preflight，后续 image_generation 从 0
+        # 重新计但前端轮询能稳定推进——避免 100% 跳回 0% 的视觉断层。
+        progress_max=0.2,
+    )
     if _has_inconsistent_prompts(data.consistency_report, threshold):
         logger.warning(
             "[image-job] prompts still inconsistent after preflight revision job_id={} project_id={} user_id={} threshold={}",

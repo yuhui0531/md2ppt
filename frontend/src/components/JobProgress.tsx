@@ -1,5 +1,5 @@
 import React from 'react';
-import { Progress, Typography, Alert, Space, Card } from 'antd';
+import { Progress, Typography, Alert, Space, Card, Button } from 'antd';
 import { LoadingOutlined, CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled } from '@ant-design/icons';
 import type { JobResponse } from '../types/api';
 import { jobStatusLabel } from '../utils/projectPresentation';
@@ -8,9 +8,10 @@ const { Text } = Typography;
 
 interface JobProgressProps {
   job?: JobResponse | null;
+  onCancel?: () => void;
 }
 
-export function JobProgress({ job }: JobProgressProps) {
+export function JobProgress({ job, onCancel }: JobProgressProps) {
   if (!job) return null;
   const progress = Math.round((job.progress ?? 0) * 100);
   const isRunning = job.status === 'running';
@@ -46,9 +47,14 @@ export function JobProgress({ job }: JobProgressProps) {
             {statusIcon}
             <Text strong style={{ fontSize: 16 }}>{job.message || '正在生成'}</Text>
           </Space>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            阶段：{stageLabel(job.stage)} · 状态：{jobStatusLabel(job.status)}
-          </Text>
+          <Space size={12} align="center">
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              阶段：{stageLabel(job.stage)} · 状态：{jobStatusLabel(job.status)}
+            </Text>
+            {onCancel && isRunning && (
+              <Button size="small" danger onClick={onCancel}>取消任务</Button>
+            )}
+          </Space>
         </div>
 
         <Progress
@@ -82,6 +88,25 @@ function stageLabel(stage?: string | null): string {
     prompts_generating: '生成逐页 Prompt',
     consistency_checking: '检查一致性',
     consistency_checked: '完成',
+    checking_initial: '初始一致性检查',
+    no_inconsistent: '无需修正',
+    revising_round_1: '第 1 轮修正 prompt',
+    checking_round_1: '第 1 轮重新评分',
+    round_1_done: '第 1 轮完成',
+    revising_round_2: '第 2 轮修正 prompt',
+    checking_round_2: '第 2 轮重新评分',
+    round_2_done: '第 2 轮完成',
+    revising_round_3: '第 3 轮修正 prompt',
+    checking_round_3: '第 3 轮重新评分',
+    round_3_done: '第 3 轮完成',
+    // 生图前的自动修正阶段：复用 revise 流程，加 preflight_ 前缀区分来源，
+    // 让用户在生图进度条上看到「生图前自动修正 prompt」而非干巴巴的「第 N 轮」。
+    preflight_checking_initial: '生图前检查一致性',
+    preflight_no_inconsistent: '生图前检查·prompt 一致',
+    preflight_revising_round_1: '生图前自动修正 prompt（第 1 轮）',
+    preflight_checking_round_1: '生图前重新评分（第 1 轮）',
+    preflight_round_1_done: '生图前修正完成',
+    revising_prompts: '生图前修正 prompt',
     import_scanning: '扫描导入文件',
     import_outline_extracting: '提取页面结构',
     import_brief_generating: '汇总整体大纲',

@@ -263,21 +263,41 @@ class GenerationService:
             threshold: float,
             max_rounds: int = 1,
             slide_numbers: list[int] | None = None,
+            job_service: JobService | None = None,
+            job: JobRecord | None = None,
+            stage_prefix: str = "",
+            progress_max: float = 1.0,
     ) -> ProjectData:
+        # stage_prefix：preflight 调用（生图 job 内部）传 "preflight_"，让前端能
+        # 区分「独立修正 job」与「生图前自动修正」两种来源、显示不同文案。
+        # 工作台直接修正传空字符串，沿用 revising_round_N 这类原始 stage。
+        #
+        # progress_max：preflight 路径下，本流程仅占整个生图 job 进度条的前一段
+        # （默认 0.2），后续 image_generation 的 progress 从 0 重新开始计；不缩放
+        # 进度条会让用户看到 100%→0% 的视觉跳变。工作台直调时仍占满 1.0。
         data = self.project_service.get_project_data_internal(project_id)
         async with build_gateway_async_client() as async_client:
             if data.consistency_report is None:
+                self._update_job(job_service, job, f"{stage_prefix}checking_initial", 0.05 * progress_max, "正在检查一致性")
+                self._ensure_not_cancelled(job_service, job)
                 data.consistency_report = await self.check_consistency(data, threshold, async_client=async_client)
             # 与旧代码保持语义：全部达标短路直接 return，不写 DB。
+            # 但要先 emit 一个明确 stage——否则 worker 看到 stage="queued" 接着写
+            # "completed" 会让前端 message 显示「修正完成」与「无需修正」语义不符。
             if not any(
                 slide.revision_needed or slide.score < threshold
                 for slide in data.consistency_report.slides
             ):
+                self._update_job(
+                    job_service, job, f"{stage_prefix}no_inconsistent", progress_max,
+                    "全部页面已达标，无需修正",
+                )
                 return data
 
             requested_numbers = set(slide_numbers) if slide_numbers is not None else None
             previous_overall = data.consistency_report.overall_score
             for round_idx in range(1, max_rounds + 1):
+                self._ensure_not_cancelled(job_service, job)
                 inconsistent_numbers = {
                     slide.slide_no
                     for slide in data.consistency_report.slides
@@ -289,6 +309,14 @@ class GenerationService:
                     inconsistent_numbers &= requested_numbers
                 if not inconsistent_numbers:
                     break
+                # 阶段进度：每轮分两步（修正 + 重新评分），各占 1/(max_rounds*2)。
+                # 修正前到达 (round_idx-1) / max_rounds 处。
+                base_progress = (round_idx - 1) / max_rounds
+                self._update_job(
+                    job_service, job, f"{stage_prefix}revising_round_{round_idx}",
+                    (base_progress + 0.05 / max_rounds) * progress_max,
+                    f"第 {round_idx}/{max_rounds} 轮·正在修正 {len(inconsistent_numbers)} 个不一致页",
+                )
                 payload = await self._call_json(
                     "修正不一致 prompt",
                     REVISE_PROMPT,
@@ -331,6 +359,16 @@ class GenerationService:
                     replacement.image_url = original.image_url
                     merged.append(replacement)
                 data.slides = merged
+                if job_service is not None:
+                    # 每轮 LLM 返回后立刻落盘：用户在 round 2 期间取消时 round 1
+                    # 修正不丢；同步路径（job_service=None）保留单 save 语义减少 IO。
+                    self.project_service.save_project_data(data)
+                self._update_job(
+                    job_service, job, f"{stage_prefix}checking_round_{round_idx}",
+                    (base_progress + 0.55 / max_rounds) * progress_max,
+                    f"第 {round_idx}/{max_rounds} 轮·正在重新评分",
+                )
+                self._ensure_not_cancelled(job_service, job)
                 data.consistency_report = await self.check_consistency(data, threshold, async_client=async_client)
                 new_overall = data.consistency_report.overall_score
                 remaining = sum(
@@ -340,6 +378,14 @@ class GenerationService:
                 logger.info(
                     "[generation] revise round={}/{} overall_score {:.3f}->{:.3f} remaining={} project_id={}",
                     round_idx, max_rounds, previous_overall, new_overall, remaining, project_id,
+                )
+                # 本轮完成：进度直接跳到下一轮的 base（即 round_idx/max_rounds）；
+                # message 反映剩余不达标页。如果是最后一轮，跳到 progress_max 也合理
+                # （worker 收尾会再覆盖一次 completed）。
+                self._update_job(
+                    job_service, job, f"{stage_prefix}round_{round_idx}_done",
+                    (round_idx / max_rounds) * progress_max,
+                    f"第 {round_idx} 轮完成·剩余 {remaining} 个不达标页",
                 )
                 if remaining == 0:
                     break
