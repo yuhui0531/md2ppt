@@ -271,7 +271,7 @@ export function ProjectsPage() {
                 >
                   <Button type="text" danger icon={<DeleteOutlined />} disabled={actionBusy !== null}>删除</Button>
                 </Popconfirm>,
-                ...(projectProgress(project).every((step) => step.status === 'finish')
+                ...(project.images_ready
                   ? [
                       <Button
                         icon={<PictureOutlined />}
