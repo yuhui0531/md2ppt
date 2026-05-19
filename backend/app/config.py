@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     image_generation_concurrency: int = Field(default=4, ge=1)
     image_progress_flush_interval_seconds: float = Field(default=1.0, ge=0.0)
     import_structure_concurrency: int = Field(default=4, ge=1)
+    # 修正一致性按页并发数：每个 LLM 调用只处理一页 prompt，注意力集中、改写质量
+    # 高；3 并发与 import_structure 同量级，足以推进进度又不压 gateway。
+    revise_concurrency: int = Field(default=3, ge=1)
     text_cap_brief: int = Field(default=3072, ge=1)
     text_cap_source_slide_constraint: int = Field(default=512, ge=1)
     text_cap_slide_count: int = Field(default=1024, ge=1)

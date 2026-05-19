@@ -317,25 +317,81 @@ class GenerationService:
                     (base_progress + 0.05 / max_rounds) * progress_max,
                     f"第 {round_idx}/{max_rounds} 轮·正在修正 {len(inconsistent_numbers)} 个不一致页",
                 )
-                payload = await self._call_json(
-                    "修正不一致 prompt",
-                    REVISE_PROMPT,
-                    {
-                        "style_guide": data.style_guide.model_dump(mode="json") if data.style_guide else None,
-                        "consistency_report": data.consistency_report.model_dump(mode="json"),
-                        "slides": [
-                            self._consistency_slide_payload(slide)
-                            for slide in data.slides
-                            if slide.slide_no in inconsistent_numbers
-                        ],
-                    },
-                    async_client=async_client,
-                )
-                revised = [Slide.model_validate(slide) for slide in payload.get("slides", [])]
+                # 按页并发改写：之前一次 LLM 调用吞所有不达标页，输出端注意力分散
+                # 导致改写不动（实测 21 页一次只改 1-2 页有效）。改成每页一次调用，
+                # semaphore 限 revise_concurrency 并发。REVISE_PROMPT 无需改——
+                # 它已约束「不要新增/删除页面」，单页输入天然不会越界。
+                consistency_dump = data.consistency_report.model_dump(mode="json")
+                style_guide_dump = data.style_guide.model_dump(mode="json") if data.style_guide else None
+                target_slides = [s for s in data.slides if s.slide_no in inconsistent_numbers]
+                target_total = len(target_slides)
+                semaphore = asyncio.Semaphore(max(1, settings.revise_concurrency))
+                revise_state: dict[str, Any] = {"done": 0, "failed": 0}
+                revised_by_no: dict[int, Slide] = {}
+
+                async def revise_one(target: Slide) -> None:
+                    async with semaphore:
+                        self._ensure_not_cancelled(job_service, job)
+                        try:
+                            single_payload = await self._call_json(
+                                "修正不一致 prompt",
+                                REVISE_PROMPT,
+                                {
+                                    "style_guide": style_guide_dump,
+                                    "consistency_report": consistency_dump,
+                                    "slides": [self._consistency_slide_payload(target)],
+                                },
+                                async_client=async_client,
+                            )
+                            returned = single_payload.get("slides") or []
+                            if not returned:
+                                logger.warning(
+                                    "[generation] revise round={} slide={} returned 0 slides project_id={}",
+                                    round_idx, target.slide_no, project_id,
+                                )
+                                revise_state["failed"] += 1
+                                return
+                            replacement = Slide.model_validate(returned[0])
+                            if replacement.slide_no != target.slide_no:
+                                # LLM 改了 slide_no——拒绝写入，与多页旧逻辑里的 by_no
+                                # 守卫意图一致：单页输入也不允许偷改 slide_no。
+                                logger.warning(
+                                    "[generation] revise round={} slide={} LLM returned slide_no={} project_id={}",
+                                    round_idx, target.slide_no, replacement.slide_no, project_id,
+                                )
+                                revise_state["failed"] += 1
+                                return
+                            revised_by_no[target.slide_no] = replacement
+                        except HTTPException:
+                            # _ensure_not_cancelled 抛 499 必须向外传播给 worker 标
+                            # cancelled；其它 HTTPException（模型配置缺失等）也保留
+                            # 原行为：一个 chunk 报错让整轮失败更稳妥。
+                            raise
+                        except Exception as exc:
+                            # 单页模型调用失败不影响其它页：log + 计数 + 继续。
+                            # 用户视角：N 个不达标页修了 M 个，剩下下一轮再修。
+                            logger.exception(
+                                "[generation] revise round={} slide={} call failed project_id={} error={}",
+                                round_idx, target.slide_no, project_id, exc,
+                            )
+                            revise_state["failed"] += 1
+                        finally:
+                            revise_state["done"] += 1
+                            # 阶段内进度细化：修正占本轮的 [0.05, 0.55) 区间，按 done/total
+                            # 推进。让用户看到「修了 3/21 页」的实时反馈。
+                            done_ratio = revise_state["done"] / target_total if target_total else 1.0
+                            self._update_job(
+                                job_service, job, f"{stage_prefix}revising_round_{round_idx}",
+                                (base_progress + (0.05 + 0.5 * done_ratio) / max_rounds) * progress_max,
+                                f"第 {round_idx}/{max_rounds} 轮·已修正 {revise_state['done']}/{target_total} 页"
+                                + (f"（{revise_state['failed']} 失败）" if revise_state["failed"] else ""),
+                            )
+
+                await asyncio.gather(*(revise_one(s) for s in target_slides))
+                revised = list(revised_by_no.values())
                 if not revised:
-                    # LLM 返回空 slides 数组——再循环也无意义，跳出避免空转。
                     logger.warning(
-                        "[generation] revise round={} returned 0 slides project_id={}",
+                        "[generation] revise round={} all slides failed project_id={}",
                         round_idx, project_id,
                     )
                     break
