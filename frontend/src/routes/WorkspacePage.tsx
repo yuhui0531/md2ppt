@@ -7,6 +7,7 @@ import {
   generateProject,
   getActiveJob,
   insertSlide,
+  regenerateAllPromptsJob,
   regenerateImportStructure,
   regenerateOutline,
   regeneratePrompts,
@@ -317,6 +318,7 @@ export function WorkspacePage() {
   const canResume = !isImported && !['consistency_checked', 'revised'].includes(project.generation_state);
   const isDirty = slide ? draftPrompt !== slide.prompt : false;
   const importJobRunning = jobRunning && job?.kind === 'import_structure_generation';
+  const promptsRegenJobRunning = jobRunning && job?.kind === 'prompts_regeneration';
   // 任意 job 在跑都禁止写 ProjectData——update_slide_prompt 是"读整份→改一项→整包写"，
   // 与 worker 整包写之间会发生 lost update。在做到细粒度更新前，所有 mutation 都收紧。
   const mutationDisabled = busy !== null || jobRunning;
@@ -415,7 +417,46 @@ export function WorkspacePage() {
 
   async function handleRegenerateAllPrompts() {
     if (!project) return;
-    await refreshWith(() => regeneratePrompts(project.project_id), BUSY.regenerateAllPrompts, '已重新生成全部 prompt');
+    // 与 handleRegenerateImportStructure 同款 job-poll：service 内部逐页落盘
+    // （persist_streaming_slide），所以每 3 次 tick 回拉一次 project 让 prompt
+    // 文本流式出现；最后再拉一次拿最终 generation_state。
+    if (jobRunning) return;
+    const startedFor = project.project_id;
+    setBusy(BUSY.regenerateAllPrompts);
+    setMessage(null);
+    setJob(null);
+    try {
+      const createdJob = await regenerateAllPromptsJob(startedFor);
+      if (!stillScoped(startedFor)) return;
+      setJob(createdJob);
+      let pollCount = 0;
+      let refreshInFlight = false;
+      await pollJobUntilFinished(createdJob.job_id, async (latest) => {
+        if (!stillScoped(startedFor)) return;
+        setJob(latest);
+        pollCount += 1;
+        if (pollCount % 3 !== 0 || refreshInFlight) return;
+        refreshInFlight = true;
+        try {
+          const fresh = await getProject(startedFor);
+          if (stillScoped(startedFor)) setProject(fresh);
+        } catch {
+          // 与 mount effect 一致：静默单次失败。
+        } finally {
+          refreshInFlight = false;
+        }
+      });
+      if (!stillScoped(startedFor)) return;
+      const updated = await getProject(startedFor);
+      if (!stillScoped(startedFor)) return;
+      setProject(updated);
+      setMessage({ kind: 'success', text: '已重新生成全部 prompt' });
+    } catch (error) {
+      if (!stillScoped(startedFor)) return;
+      setMessage({ kind: 'error', text: error instanceof Error ? error.message : '重新生成失败' });
+    } finally {
+      if (stillScoped(startedFor)) setBusy(null);
+    }
   }
 
   async function handleRegenerateImportStructure() {
@@ -500,7 +541,10 @@ export function WorkspacePage() {
                 description="会基于当前 prompt 重新提取结构化字段（页面类型、版式建议、核心信息等），不会改写 prompt 正文。已有的一致性检查报告会被清空，下次进入生图前会重新检查。"
                 okText="确定重新解析"
                 cancelText="取消"
-                onConfirm={handleRegenerateImportStructure}
+                // 不能直接传 async handler：Popconfirm 看到 onConfirm 返回 Promise
+                // 会 await 才关弹窗，期间持续显示「确定」按钮的转圈，与底部进度
+                // 条/loading 视觉重复。包一层让 onConfirm 立即返回 void。
+                onConfirm={() => { void handleRegenerateImportStructure(); }}
                 disabled={actionsLocked}
               >
                 <Button
@@ -518,7 +562,8 @@ export function WorkspacePage() {
                   description="会按推荐页数让大模型重写所有页，丢弃当前的手动编辑（含新增/删除）。确定继续？"
                   okText="确定重生成"
                   cancelText="取消"
-                  onConfirm={handleRegenerateOutline}
+                  // 同 866：onConfirm 返回 Promise 会让弹框等到 handler 跑完才关。
+                  onConfirm={() => { void handleRegenerateOutline(); }}
                   disabled={actionsLocked}
                 >
                   <Button
@@ -534,15 +579,16 @@ export function WorkspacePage() {
                   description="会让大模型按当前大纲重写所有页的 prompt，覆盖你手动编辑过的 prompt。确定继续？"
                   okText="确定重生成"
                   cancelText="取消"
-                  onConfirm={handleRegenerateAllPrompts}
+                  // 同 866：onConfirm 返回 Promise 会让弹框转圈直到 handler 跑完。
+                  onConfirm={() => { void handleRegenerateAllPrompts(); }}
                   disabled={actionsLocked}
                 >
                   <Button
                     icon={<SyncOutlined />}
                     disabled={actionsLocked}
-                    loading={busy === BUSY.regenerateAllPrompts}
+                    loading={busy === BUSY.regenerateAllPrompts || promptsRegenJobRunning}
                   >
-                    重新生成全部 prompt
+                    {promptsRegenJobRunning ? '重生成中…' : '重新生成全部 prompt'}
                   </Button>
                 </Popconfirm>
               </>
@@ -674,7 +720,7 @@ export function WorkspacePage() {
                   disabled={actionsLocked}
                   onSelect={() => trySwitchActiveSlide(index)}
                   onInsertAfter={() => openInsertModal({ mode: 'after', anchorSlideId: item.id, anchorLabel: getSlideLabel(item) })}
-                  onDelete={() => handleDeleteSlide(item.id)}
+                  onDelete={() => { void handleDeleteSlide(item.id); }}
                 />
               ))}
               <div style={{ padding: '12px 24px', borderTop: project.slides.length ? '1px solid #f0f0f0' : 'none' }}>

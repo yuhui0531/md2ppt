@@ -39,6 +39,12 @@ export async function regeneratePrompts(projectId: string, slideNumbers?: number
   return response.project;
 }
 
+export function regenerateAllPromptsJob(projectId: string): Promise<JobResponse> {
+  return api(`/api/projects/${projectId}/regenerate-prompts-job`, {
+    method: 'POST',
+  });
+}
+
 export async function checkConsistency(projectId: string, threshold: number): Promise<ProjectData> {
   const response = await api<{ project: ProjectData }>(`/api/projects/${projectId}/check-consistency`, {
     method: 'POST',

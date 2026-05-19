@@ -264,7 +264,10 @@ export function ProjectsPage() {
                 <Popconfirm
                   title="确认删除该项目？"
                   description="此操作不可恢复。"
-                  onConfirm={() => handleDelete(project)}
+                  // 同款坑：onConfirm 返回 Promise 会让 Popconfirm 等到删除接口
+                  // 返回才关弹框，期间「确定」按钮转圈。包 void 让弹框立即消失，
+                  // loading 由 actionBusy 在外层按钮区呈现。
+                  onConfirm={() => { void handleDelete(project); }}
                   okText="确定"
                   cancelText="取消"
                   okButtonProps={{ danger: true }}

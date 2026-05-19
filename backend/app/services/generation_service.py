@@ -255,12 +255,32 @@ class GenerationService:
         self.project_service.save_project_data(data)
         return data
 
-    async def regenerate_prompts(self, project_id: str, slide_numbers: list[int] | None = None) -> ProjectData:
+    async def regenerate_prompts(
+            self,
+            project_id: str,
+            slide_numbers: list[int] | None = None,
+            job_service: JobService | None = None,
+            job: JobRecord | None = None,
+    ) -> ProjectData:
+        # job_service/job 仅由「重新生成全部 prompt」job 路径传入；单页同步端点保持
+        # 不传，与旧行为一致（API 仍返回 ProjectData）。job 路径下让 generate_slide_prompts
+        # 把进度写到 0.05→0.95 区间，首尾留给 queued / saving 阶段。
         data = self.project_service.get_project_data_internal(project_id)
+        if job_service and job:
+            self._update_job(job_service, job, "queued", 0.02, "重新生成 prompt 任务已创建")
         async with build_gateway_async_client() as async_client:
             if data.style_guide is None:
+                if job_service and job:
+                    self._update_job(job_service, job, "style_guide_generating", 0.04,
+                                     "正在补齐风格规范")
                 data.style_guide = await self.generate_style_guide(data, async_client=async_client)
-            generated = await self.generate_slide_prompts(data, slide_numbers, async_client=async_client)
+            generated = await self.generate_slide_prompts(
+                data, slide_numbers,
+                job_service=job_service, job=job,
+                async_client=async_client,
+                base_progress=0.05 if (job_service and job) else 0.68,
+                progress_span=0.9 if (job_service and job) else 0.16,
+            )
         if slide_numbers:
             by_no = {slide.slide_no: slide for slide in generated}
             merged: list[Slide] = []
@@ -278,6 +298,8 @@ class GenerationService:
             data.slides = generated
         data.consistency_report = None
         data.generation_state = "prompts_generated"
+        if job_service and job:
+            self._update_job(job_service, job, "prompts_generated", 0.98, "重新生成结果已保存")
         self.project_service.save_project_data(data)
         return data
 
@@ -818,6 +840,8 @@ class GenerationService:
             job_service: JobService | None = None,
             job: JobRecord | None = None,
             async_client: httpx.AsyncClient | None = None,
+            base_progress: float = 0.68,
+            progress_span: float = 0.16,
     ) -> list[Slide]:
         """按页并发生成 prompt。每页一次 LLM 调用让模型独占注意力把 style_guide 硬规则
         逐条落实到 slide.prompt 里——批量调用下中间页注意力被稀释、风格约束退化成泛化短语
@@ -837,8 +861,8 @@ class GenerationService:
             # 空目标兜底：保留旧返回语义（partial 路径返回原 slides，full 路径不会进这里）。
             return list(data.slides)
 
-        base_progress = 0.68
-        progress_span = 0.16
+        # base_progress/progress_span 由调用方传入：run_generation 路径占 0.68→0.84
+        # 这一段；regenerate_prompts job 路径独占 0.05→0.95（首尾留给 queued/saving）。
         semaphore = asyncio.Semaphore(max(1, settings.slide_prompt_concurrency))
         state: dict[str, Any] = {"done": 0, "failed": 0}
         generated_by_no: dict[int, Slide] = {}

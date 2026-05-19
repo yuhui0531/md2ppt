@@ -184,6 +184,74 @@ async def regenerate_prompts(
     return ProjectResponse(project=updated)
 
 
+@router.post("/api/projects/{project_id}/regenerate-prompts-job", response_model=JobResponse)
+async def regenerate_prompts_job(
+    project_id: str,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> JobResponse:
+    """「重新生成全部 prompt」job 化入口：仅用于全量重生，前端能挂进度条。
+    单页重生继续走上面的同步端点——一次 LLM 调用秒级返回，不值得起 job。"""
+    record = _assert_project_owner(session, project_id, user_id)
+    _reject_imported_project(record)
+    job_service = JobService(session)
+    if job_service.has_active_job(project_id):
+        logger.warning(
+            "[regenerate-prompts-job] create rejected project_id={} user_id={} reason=active_job",
+            project_id, user_id,
+        )
+        raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
+    job = job_service.create_job(project_id, kind="prompts_regeneration")
+    logger.info(
+        "[regenerate-prompts-job] created job_id={} project_id={} user_id={}",
+        job.id, project_id, user_id,
+    )
+    job_service.update(job, stage="queued", progress=0.0, message="重新生成任务已创建", status="running")
+    asyncio.create_task(_run_regenerate_prompts_job(job.id, project_id, user_id))
+    return JobResponse.from_record(job)
+
+
+async def _run_regenerate_prompts_job(job_id: str, project_id: str, user_id: int) -> None:
+    with Session(engine) as session:
+        job_service = JobService(session)
+        job = job_service.get_job(job_id)
+        try:
+            await GenerationService(session, user_id).regenerate_prompts(
+                project_id, slide_numbers=None, job_service=job_service, job=job,
+            )
+            # 与 revise/generation worker 对齐：service 内部已多次 _update_job；这里再
+            # refresh 一次状态，避免 cancelled 路径被覆盖回 completed。
+            session.refresh(job)
+            if job.status != "cancelled":
+                job_service.update(job, stage="prompts_generated", progress=1.0,
+                                   message="已重新生成全部 prompt", status="completed")
+        except HTTPException as exc:
+            if exc.status_code == 499:
+                logger.info(
+                    "[regenerate-prompts-job] cancelled job_id={} project_id={} user_id={}",
+                    job_id, project_id, user_id,
+                )
+                session.refresh(job)
+                if job.status != "cancelled":
+                    job_service.update(job, stage="cancelled", progress=job.progress,
+                                       message="任务已取消", status="cancelled")
+                return
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            logger.exception(
+                "[regenerate-prompts-job] failed job_id={} project_id={} user_id={} stage={} status_code={} detail={}",
+                job_id, project_id, user_id, job.stage, exc.status_code, detail,
+            )
+            job_service.update(job, stage="failed", progress=job.progress,
+                               message="重新生成失败", status="failed", error=detail)
+        except Exception as exc:
+            logger.exception(
+                "[regenerate-prompts-job] failed job_id={} project_id={} user_id={} stage={} error={}",
+                job_id, project_id, user_id, job.stage, exc,
+            )
+            job_service.update(job, stage="failed", progress=job.progress,
+                               message="重新生成失败", status="failed", error=str(exc))
+
+
 @router.post("/api/projects/{project_id}/check-consistency", response_model=ProjectResponse)
 async def check_consistency(
     project_id: str,
