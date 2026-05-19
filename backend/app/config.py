@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # 修正一致性按页并发数：每个 LLM 调用只处理一页 prompt，注意力集中、改写质量
     # 高；3 并发与 import_structure 同量级，足以推进进度又不压 gateway。
     revise_concurrency: int = Field(default=3, ge=1)
+    # 风格一致性评分按块并发数：与 revise 同量级；每块都带完整 style_guide。
+    consistency_concurrency: int = Field(default=3, ge=1)
+    # 单次评分 LLM 调用最多承载的页数；超过时分块并发。
+    consistency_chunk_max_size: int = Field(default=6, ge=1)
     text_cap_brief: int = Field(default=3072, ge=1)
     text_cap_source_slide_constraint: int = Field(default=512, ge=1)
     text_cap_slide_count: int = Field(default=1024, ge=1)

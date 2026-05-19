@@ -34,6 +34,7 @@ from app.models.model_config import ModelConfigRecord
 from app.models.project import ProjectRecord
 from app.models.schemas import (
     ConsistencyReport,
+    ConsistencySlideReport,
     DeckBrief,
     GenerationOptions,
     ProjectData,
@@ -281,6 +282,20 @@ class GenerationService:
                 self._update_job(job_service, job, f"{stage_prefix}checking_initial", 0.05 * progress_max, "正在检查一致性")
                 self._ensure_not_cancelled(job_service, job)
                 data.consistency_report = await self.check_consistency(data, threshold, async_client=async_client)
+            else:
+                # 阈值归一化：旧 report 的 revision_needed 是按当时的 threshold 算的，
+                # 但用户可能在两次操作间调过 consistency_threshold；不归一化会让下面
+                # inconsistent_numbers 误用旧布尔标志（旧 threshold=0.7 阈值下被标 True
+                # 的 score=0.6 页，新 threshold=0.5 下其实已达标，但会被重复修正）。
+                # score 与 threshold 无关，所以只重算 revision_needed 即可。
+                data.consistency_report.threshold = threshold
+                report_by_no = {r.slide_no: r for r in data.consistency_report.slides}
+                for r in data.consistency_report.slides:
+                    r.revision_needed = r.score < threshold
+                for slide in data.slides:
+                    r = report_by_no.get(slide.slide_no)
+                    if r is not None:
+                        slide.revision_needed = r.revision_needed
             # 与旧代码保持语义：全部达标短路直接 return，不写 DB。
             # 但要先 emit 一个明确 stage——否则 worker 看到 stage="queued" 接着写
             # "completed" 会让前端 message 显示「修正完成」与「无需修正」语义不符。
@@ -425,7 +440,14 @@ class GenerationService:
                     f"第 {round_idx}/{max_rounds} 轮·正在重新评分",
                 )
                 self._ensure_not_cancelled(job_service, job)
-                data.consistency_report = await self.check_consistency(data, threshold, async_client=async_client)
+                # 增量重评：只对本轮真实被改写的页跑 LLM（独占注意力，质量上限最高），
+                # 其它页保留旧条目；overall_score 用全量 slides 的新 score 列表 P20 重算。
+                # 用 by_no.keys()（本轮真改了的页），不是 requested_numbers / inconsistent_numbers
+                # ——失败页不该被算成"改了"，否则会拿失败后的同一份 prompt 再评一遍。
+                revised_nos = sorted(by_no.keys())
+                data.consistency_report = await self.rescore_slides(
+                    data, revised_nos, threshold, async_client=async_client,
+                )
                 new_overall = data.consistency_report.overall_score
                 remaining = sum(
                     1 for slide in data.consistency_report.slides
@@ -783,25 +805,327 @@ class GenerationService:
 
     async def check_consistency(self, data: ProjectData, threshold: float | None = None,
                                 async_client: httpx.AsyncClient | None = None) -> ConsistencyReport:
+        """全量评分入口：把 slides 按动态块大小切片并发评分，每块都带完整 style_guide。
+
+        为什么是分块并发：旧实现把所有 slides 塞进一次 LLM 调用，页多了后中间页注意力
+        被稀释、单页 issues 文案变粗糙、score 趋同到 0.7-0.8 安全区。CONSISTENCY_PROMPT
+        声明 style_guide 是唯一判定标准 → 单页 score 在数学上只依赖 (slide, style_guide)，
+        不依赖其它 slides，所以分块不损失语义。
+
+        为什么 overall_score / revision_needed 后端算：
+        - LLM 输出的 overall_score 在分块场景下没有意义（每块只看到部分页）；
+        - 用 P20 聚合反映木桶效应，且确定性可测；
+        - score < threshold 的页必须 revision_needed=True，不能让 LLM 主观判断兜底。
+
+        副作用：把每页的 score/issues/revision_needed 写回 data.slides，与旧实现一致——
+        前端依赖 slide.style_consistency_score 渲染，不要破坏这条契约。
+        """
         threshold = threshold if threshold is not None else data.generation_options.consistency_threshold
-        payload = await self._call_json(
-            "风格一致性检查",
-            CONSISTENCY_PROMPT,
-            {
-                "threshold": threshold,
-                "style_guide": data.style_guide.model_dump(mode="json") if data.style_guide else None,
-                "slides": [self._consistency_slide_payload(slide) for slide in data.slides],
-            },
-            async_client=async_client,
+        style_guide_dump = data.style_guide.model_dump(mode="json") if data.style_guide else None
+        if not data.slides:
+            # 空项目防御：避免 _score_aggregate([]) 与 chunks=[] 的并发空 gather。
+            return ConsistencyReport(overall_score=0.0, threshold=threshold, slides=[])
+
+        chunk_size = self._dynamic_chunk_size(len(data.slides))
+        chunks: list[list[Slide]] = [
+            data.slides[i:i + chunk_size] for i in range(0, len(data.slides), chunk_size)
+        ]
+        slide_reports = await self._score_chunks_concurrently(
+            chunks, style_guide_dump, threshold, async_client,
         )
-        report = self._validate_model(ConsistencyReport, self._normalize_consistency_report(payload), "风格一致性检查")
+
+        # 按 data.slides 的顺序输出 report.slides——并发返回顺序不确定，但前端预期
+        # report.slides[i] 对应 data.slides[i]，必须按 slide_no 锚定后重排。
+        by_no: dict[int, ConsistencySlideReport] = {r.slide_no: r for r in slide_reports}
+        ordered_reports = [by_no[slide.slide_no] for slide in data.slides if slide.slide_no in by_no]
+
+        overall = self._score_aggregate([r.score for r in ordered_reports])
+        # 后端确定性兜底：revision_needed = score < threshold，双向覆盖 LLM 输出。
+        # threshold 是唯一真相来源，不依赖 LLM 自觉——LLM 在 prompt 里被告知按 threshold
+        # 判断，但模型偶发不服从（任一方向都可能错），下游 _has_inconsistent_prompts 与
+        # 前端按钮态都按这个布尔判断，必须由后端确定性产出。
+        # 失败哨兵（score=0.0）：0.0 < threshold 永真 → revision_needed=True，与 fail-loud
+        # 兜底一致。
+        for r in ordered_reports:
+            r.revision_needed = r.score < threshold
+
+        report = ConsistencyReport(
+            overall_score=overall, threshold=threshold, slides=ordered_reports,
+        )
+        # 写回 slide 上的三个 stale 字段——_consistency_slide_payload 会在下一轮评分时
+        # 把它们剔除，但前端在两轮评分之间依赖 slide.style_consistency_score 渲染。
         for slide in data.slides:
-            slide_report = next((item for item in report.slides if item.slide_no == slide.slide_no), None)
+            slide_report = by_no.get(slide.slide_no)
             if slide_report:
                 slide.style_consistency_score = slide_report.score
                 slide.style_issues = slide_report.issues
                 slide.revision_needed = slide_report.revision_needed
         return report
+
+    async def rescore_slides(
+            self,
+            data: ProjectData,
+            slide_numbers: list[int],
+            threshold: float | None = None,
+            async_client: httpx.AsyncClient | None = None,
+    ) -> ConsistencyReport:
+        """增量评分入口：只对 slide_numbers 里的页跑 LLM；其它页保留旧 ConsistencySlideReport
+        条目；overall_score 用全量 slides 的新 score 列表 P20 重算。
+
+        什么时候用：上层 revise_inconsistent_prompts 在「改写完 N 页」之后调用——
+        其它页 prompt 没动，没必要重评。增量评分让被改写的页独占 LLM 注意力（最少 1 页/
+        一次调用），质量上限最高；未改写的页 score/issues 也保持不变，符合用户直觉
+        「我没动它，分数不应该乱跳」。
+
+        与 check_consistency 的差异：本函数同样按 _dynamic_chunk_size 切块并发，但只
+        切被改写的 target_slides；未改写的页保留旧 ConsistencySlideReport。当一次性
+        改写的页数超过 chunk_max_size 时（例如「修正全部不一致」涉及 8 页），分块能
+        避免退化成单次大调用，重现注意力稀释问题。
+        """
+        threshold = threshold if threshold is not None else data.generation_options.consistency_threshold
+        if data.consistency_report is None:
+            # rescore_slides 假定已有基线 report 可以合并；revise_inconsistent_prompts 在
+            # 第 280 行已保证调用前 data.consistency_report 非空。这里只是防御性退化，
+            # 避免外部直接调用时崩溃。
+            return await self.check_consistency(data, threshold, async_client=async_client)
+
+        # F1 完整性检查：基线 report 必须覆盖 data.slides 的所有 slide_no——增量合并路径
+        # 无法自我修复缺页（未被本轮改写的页靠基线复用，基线缺就永远缺）。一旦基线不完整
+        # （旧数据 / revise 中途新增页 / 上一轮异常退出留下的脏状态），fall back 到全量
+        # check_consistency 让评分自愈，避免 remaining 统计漏页导致循环提前退出。
+        all_nos = {s.slide_no for s in data.slides}
+        baseline_nos = {r.slide_no for r in data.consistency_report.slides}
+        missing_from_baseline = all_nos - baseline_nos
+        if missing_from_baseline:
+            logger.warning(
+                "[generation] rescore_slides: baseline report incomplete missing={}, "
+                "falling back to full check_consistency",
+                sorted(missing_from_baseline),
+            )
+            return await self.check_consistency(data, threshold, async_client=async_client)
+
+        style_guide_dump = data.style_guide.model_dump(mode="json") if data.style_guide else None
+        target_set = set(slide_numbers)
+        target_slides = [s for s in data.slides if s.slide_no in target_set]
+
+        if target_slides:
+            chunk_size = self._dynamic_chunk_size(len(target_slides))
+            chunks: list[list[Slide]] = [
+                target_slides[i:i + chunk_size] for i in range(0, len(target_slides), chunk_size)
+            ]
+            new_reports = await self._score_chunks_concurrently(
+                chunks, style_guide_dump, threshold, async_client,
+            )
+        else:
+            # slide_numbers 为空（或与 data.slides 无交集）：什么都不评，只用旧分数
+            # 重算 overall。这个分支理论上不该被命中（上层调用前会过滤），但保留兼容。
+            new_reports = []
+        new_by_no = {r.slide_no: r for r in new_reports}
+        # 兜底阈值同 check_consistency：revision_needed = score < threshold 双向覆盖。
+        for r in new_by_no.values():
+            r.revision_needed = r.score < threshold
+
+        # 合并：被新评分的页用 new_by_no；其它页用 old_by_no 原样复用。
+        # F1 检查已保证 baseline_nos ⊇ all_nos，所以 old_by_no 必能覆盖未评分页。
+        # 按 data.slides 顺序遍历 → merged_reports 顺序与 data.slides 一致。
+        merged_reports: list[ConsistencySlideReport] = []
+        old_by_no = {r.slide_no: r for r in data.consistency_report.slides}
+        for slide in data.slides:
+            if slide.slide_no in new_by_no:
+                merged_reports.append(new_by_no[slide.slide_no])
+            else:
+                # F1 保证 slide.slide_no 必在 old_by_no 中；KeyError 在此处 fail loud。
+                merged_reports.append(old_by_no[slide.slide_no])
+
+        # 阈值归一化：基线复用页的 revision_needed 是按旧 threshold 算的；用户可能在
+        # 两次评分间调整了 consistency_threshold。score 与 threshold 无关（score 只
+        # 取决于 slide vs style_guide），所以基线 score 复用安全；但 revision_needed
+        # 必须按当前 threshold 重算，否则 report.threshold 会与 slides[*].revision_needed
+        # 矛盾，下游 _has_inconsistent_prompts、前端按钮态、循环里的 remaining 都会出错。
+        for r in merged_reports:
+            r.revision_needed = r.score < threshold
+
+        # overall 基于「最新的全量分数」重算：新评分的页用新 score，未评分的页用旧 score。
+        overall = self._score_aggregate([r.score for r in merged_reports])
+        report = ConsistencyReport(
+            overall_score=overall, threshold=threshold, slides=merged_reports,
+        )
+        # 写回 slide 字段：
+        # - 新评分页：score/issues/revision_needed 全部更新。
+        # - 未评分页：保留旧 score/issues（增量语义——LLM 没看过这页，避免凭空抖动），
+        #   但 revision_needed 必须按当前 threshold 重算，跟 merged_reports 保持自洽。
+        for slide in data.slides:
+            new_report = new_by_no.get(slide.slide_no)
+            if new_report:
+                slide.style_consistency_score = new_report.score
+                slide.style_issues = new_report.issues
+                slide.revision_needed = new_report.revision_needed
+            else:
+                # F1 保证 slide.slide_no 必在 old_by_no 中。
+                slide.revision_needed = old_by_no[slide.slide_no].score < threshold
+        return report
+
+    async def _score_chunks_concurrently(
+            self,
+            chunks: list[list[Slide]],
+            style_guide_dump: dict[str, Any] | None,
+            threshold: float,
+            async_client: httpx.AsyncClient | None,
+    ) -> list[ConsistencySlideReport]:
+        """对多块 slide 做并发 LLM 评分；展平返回所有页的报告（顺序按块顺序）。
+
+        被 check_consistency 与 rescore_slides 共享，避免分块/并发/信号量逻辑两套实现
+        漂移。返回顺序与 chunks 展平顺序一致，调用方负责按 slide_no 重排。
+        """
+        # consistency_concurrency 默认 3：和 revise_concurrency 同量级，gateway 限流友好。
+        semaphore = asyncio.Semaphore(max(1, settings.consistency_concurrency))
+
+        async def score_chunk(chunk_slides: list[Slide]) -> list[ConsistencySlideReport]:
+            async with semaphore:
+                return await self._score_one_chunk(
+                    chunk_slides, style_guide_dump, threshold, async_client,
+                )
+
+        chunk_results = await asyncio.gather(*(score_chunk(c) for c in chunks))
+        return [item for chunk in chunk_results for item in chunk]
+
+    async def _score_one_chunk(
+            self,
+            chunk_slides: list[Slide],
+            style_guide_dump: dict[str, Any] | None,
+            threshold: float,
+            async_client: httpx.AsyncClient | None,
+    ) -> list[ConsistencySlideReport]:
+        """对一组 slide 做一次 LLM 评分，并保证返回的 slide_no 完整性。
+
+        三层兜底：
+        1) LLM 返回的 slide_no 不在输入集合里 → 丢弃（防 LLM 编造幽灵页）。
+        2) LLM 漏返某些 slide_no → 重试 1 次（共 2 次调用），重试时只重发缺失页，
+           不覆盖第一次已成功返回的页：LLM 非确定性，整批重发可能把 0.9 改成 0.7，
+           破坏未漏页的稳定性；同时缩小 batch 也能降低上下文压力。
+        3) 重试后仍漏页 → fail loud：返回 score=0.0 + revision_needed=True + 显式失败
+           issues，让前端能区分『真低分』与『评分失败』（对齐 CLAUDE.md Rule 12），
+           而不是悄悄返回少一页的列表让上层崩溃在合并阶段。score=0.0 是哨兵值，
+           _score_aggregate 会把它从 P20 计算中过滤掉，避免一页失败把 overall 拉到地板。
+
+        返回顺序与 chunk_slides 一致——上层 check_consistency 依赖这个顺序做 by_no 合并。
+        """
+        expected_nos = {s.slide_no for s in chunk_slides}
+        # last_returned 跨重试累积：第一次返回了 1、2，第二次重发缺失的 3，最终聚成全集。
+        last_returned: dict[int, ConsistencySlideReport] = {}
+        pending_slides = list(chunk_slides)  # 第一次发全部；后续只发缺失页
+        attempts = 0
+        max_attempts = 2  # 1 次正常 + 1 次重试。再多不划算：3 次仍漏的页通常 prompt 本身有问题。
+        while attempts < max_attempts and pending_slides:
+            attempts += 1
+            # 本轮 accept guard：只接受本轮提交的 slide_no。expected_nos 是跨重试全集，
+            # 拿它做 guard 会让重试响应里 LLM 违规返回的「已成功页」覆盖 last_returned，
+            # 与「重试不扰动已成功页」的语义相悖。用 pending_nos 既能挡幽灵页（不在
+            # 本轮提交里的 slide_no），也能挡 LLM 多嘴回声（已成功页的 slide_no）。
+            pending_nos = {s.slide_no for s in pending_slides}
+            payload = await self._call_json(
+                "风格一致性检查",
+                CONSISTENCY_PROMPT,
+                {
+                    "threshold": threshold,
+                    "style_guide": style_guide_dump,
+                    # _consistency_slide_payload 剔除 style_consistency_score 等 stale 字段，
+                    # 防 LLM 把上轮的旧分数原样复制回输出（自我锚定问题）。
+                    "slides": [self._consistency_slide_payload(s) for s in pending_slides],
+                },
+                async_client=async_client,
+            )
+            report = self._validate_model(
+                ConsistencyReport,
+                self._normalize_consistency_report(payload),
+                "风格一致性检查",
+            )
+            for item in report.slides:
+                if item.slide_no in pending_nos:
+                    last_returned[item.slide_no] = item
+            missing = expected_nos - set(last_returned.keys())
+            if not missing:
+                break
+            logger.warning(
+                "[generation] consistency chunk attempt={}/{} missing slide_nos={} expected={}",
+                attempts, max_attempts, sorted(missing), sorted(expected_nos),
+            )
+            # 下一轮只重发缺失页，保持 chunk_slides 的相对顺序。
+            pending_slides = [s for s in chunk_slides if s.slide_no in missing]
+
+        # 重试用尽后仍缺的页：fail loud。注意 score=0.0 + issues 含「评分失败」让前端
+        # 能识别（前端可以渲染为灰色"请重试"状态而不是把它当作"严重不一致"的红色 0 分）。
+        missing = expected_nos - set(last_returned.keys())
+        for slide_no in missing:
+            last_returned[slide_no] = ConsistencySlideReport(
+                slide_no=slide_no,
+                score=0.0,
+                issues=["评分失败：LLM 未返回该页评分，请重试"],
+                revision_needed=True,
+                suggested_fix="",
+            )
+        # 按输入顺序输出——chunk_slides 已经是 data.slides 的一段切片，保留顺序让上层
+        # 合并时不需要再排序。
+        return [last_returned[s.slide_no] for s in chunk_slides]
+
+    @staticmethod
+    def _dynamic_chunk_size(n: int) -> int:
+        """按总页数动态选块大小：先决定要切几块（chunks），再决定每块多少页。
+
+        算法：
+        - chunks = ceil(n / max_size)  → 至少切到每块 ≤ max_size 的块数
+        - chunk_size = ceil(n / chunks) → 让所有块尽量均匀（不出现 6+6+1 这种尾块过小）
+
+        例子（max_size=6）：
+        - n=6  → chunks=1, size=6  → [6]
+        - n=7  → chunks=2, size=4  → [4, 3]
+        - n=12 → chunks=2, size=6  → [6, 6]
+        - n=13 → chunks=3, size=5  → [5, 5, 3]
+        - n=20 → chunks=4, size=5  → [5, 5, 5, 5]
+
+        为什么要均匀：尾块只有 1-2 页时单页 LLM 调用的固定开销（system prompt +
+        style_guide）变得不划算，且单页 LLM 输出 issues 文案反而偏少（无对照参考）。
+        """
+        max_size = max(1, settings.consistency_chunk_max_size)
+        if n <= max_size:
+            return max(1, n)
+        chunks = math.ceil(n / max_size)
+        return math.ceil(n / chunks)
+
+    @staticmethod
+    def _score_aggregate(scores: list[float]) -> float:
+        """P20 聚合：取排序后第 20 分位的值。
+
+        为什么是 P20 而不是 mean：一致性是「最差页拉低整体」的木桶效应，mean 会让
+        1-2 个低分页被高分页稀释（10 页 9 个 0.9 + 1 个 0.3 → mean=0.84 看起来还行，
+        但产品上这是「有一页严重出问题」，需要让 overall 反映出来）。
+
+        为什么不是 min：min 对单点噪点（评分失败页给 0.0、LLM 偶发误判 0.3）过敏感，
+        会让大盘分数被一个 outlier 拉到地板。P20 在木桶效应和抗噪点之间折中。
+
+        为什么 < 5 个值时退化为 min：样本太小时分位数不稳定（n=2 时 P20 等于较小值，
+        和 min 一样；n=3、4 时插值结果接近 min 但不直观），直接用 min 语义清晰。
+
+        过滤 0.0 哨兵：_score_one_chunk 在评分失败时返回 score=0.0，那是「评分失败」
+        而不是「分数极低」。把 0.0 纳入 P20 会让一页失败就把 overall 拉到地板，与
+        产品语义不符。哨兵过滤后若全空（极端：整批失败），返回 0.0 作为兜底。
+        """
+        valid = [s for s in scores if s > 0.0]
+        if not valid:
+            return 0.0
+        if len(valid) < 5:
+            return min(valid)
+        ordered = sorted(valid)
+        # P20 线性插值：rank = 0.2 * (n - 1) 是 numpy/pandas 默认的 linear 方法。
+        # 例：n=10 → rank=1.8，取 ordered[1] 和 ordered[2] 加权 0.8。
+        # 4 档离散值（0.3/0.5/0.7/0.9）下插值结果可能落在档之间（如 0.78），这是
+        # 预期行为——overall 不是单页 score，不必离散化。
+        rank = 0.2 * (len(ordered) - 1)
+        lo = int(math.floor(rank))
+        hi = int(math.ceil(rank))
+        if lo == hi:
+            return ordered[lo]
+        return ordered[lo] + (ordered[hi] - ordered[lo]) * (rank - lo)
 
     @staticmethod
     def _update_job(job_service: JobService | None, job: JobRecord | None, stage: str, progress: float,
