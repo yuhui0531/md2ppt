@@ -7,7 +7,7 @@ import type { ProjectSummary } from '../types/api';
 import { projectHasActiveJob, projectProgress, projectStateLabel } from '../utils/projectPresentation';
 
 import { Card, Col, Row, Typography, Button, Space, Statistic, List, Tag, Popconfirm, Input, Alert, Empty, Segmented, Steps } from 'antd';
-import { EditOutlined, DeleteOutlined, RightOutlined, ExportOutlined, ThunderboltOutlined, LoadingOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, RightOutlined, ExportOutlined, ThunderboltOutlined, LoadingOutlined, PictureOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
@@ -271,6 +271,17 @@ export function ProjectsPage() {
                 >
                   <Button type="text" danger icon={<DeleteOutlined />} disabled={actionBusy !== null}>删除</Button>
                 </Popconfirm>,
+                ...(projectProgress(project).every((step) => step.status === 'finish')
+                  ? [
+                      <Button
+                        icon={<PictureOutlined />}
+                        onClick={() => navigate(`/workspace/${project.project_id}/images`)}
+                        disabled={actionBusy !== null}
+                      >
+                        查看图片
+                      </Button>,
+                    ]
+                  : []),
                 <Button onClick={() => navigate(`/workspace/${project.project_id}`)} type='primary'>进入工作台</Button>,
               ]}
             >
