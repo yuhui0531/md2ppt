@@ -154,6 +154,29 @@ class JobResponse(BaseModel):
     progress: float | None = None
     message: str | None = None
     error: str | None = None
+    # 大纲/逐页 prompt 流式阶段的「N/total」计数：用 message 里嵌 "5/18 页" 在前端
+    # 体验不稳（解析正则脆、阶段一切走文案就丢），改成 JobRecord 的一级字段后
+    # 前端可以直接 displayJob.completed_slides / displayJob.total_slides 渲染。
+    # 非流式阶段（brief / style_guide / consistency）保持 None。
+    completed_slides: int | None = None
+    total_slides: int | None = None
+
+    @classmethod
+    def from_record(cls, job: Any) -> "JobResponse":
+        """从 JobRecord 构造 JobResponse。八处 API 出口都走这里，避免每加一个字段
+        要跑遍 9 个构造点。Any 标注：避免在 schemas → models 的反向导入。"""
+        return cls(
+            job_id=job.id,
+            project_id=job.project_id,
+            kind=job.kind,
+            status=job.status,
+            stage=job.stage,
+            progress=job.progress,
+            message=job.message,
+            error=job.error,
+            completed_slides=job.completed_slides,
+            total_slides=job.total_slides,
+        )
 
 
 class ProjectSummary(BaseModel):

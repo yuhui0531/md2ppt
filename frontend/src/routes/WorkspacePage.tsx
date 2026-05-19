@@ -124,8 +124,28 @@ export function WorkspacePage() {
       // 但只有 generation / import_structure_generation 的成功/失败提示才会在这页显示，
       // image_generation 的提示交给生图页处理。
       try {
-        const finalJob = await pollJobUntilFinished(active.job_id, (latest) => {
-          if (!cancelled) setJob(latest);
+        // mid-job 周期刷 project：流式阶段后端会逐页落盘，前端轮询 onUpdate 里
+        // 每 3 次（~3.6s）拉一次 /projects/{id}，让左侧「页数与大纲」列表行级增长。
+        // 计数器放在闭包里，避开改 jobPolling 的签名。
+        // in-flight 守卫：pollJobUntilFinished 没 await onUpdate 的返回 Promise，
+        // 多次拉的请求可能乱序到达，旧响应覆盖新响应会让 slides 列表往回缩。
+        // 如果上一次 getProject 还没回来，本轮直接跳过；下一次 tick 会自然补上。
+        let pollCount = 0;
+        let refreshInFlight = false;
+        const finalJob = await pollJobUntilFinished(active.job_id, async (latest) => {
+          if (cancelled) return;
+          setJob(latest);
+          pollCount += 1;
+          if (pollCount % 3 !== 0 || refreshInFlight) return;
+          refreshInFlight = true;
+          try {
+            const fresh = await getProject(projectId);
+            if (!cancelled) setProject(fresh);
+          } catch {
+            // 静默：下一次 poll 还会重试，避免一次网络抖动就在 UI 上弹错误条。
+          } finally {
+            refreshInFlight = false;
+          }
         });
         if (cancelled) return;
         const updated = await getProject(projectId);
@@ -258,8 +278,22 @@ export function WorkspacePage() {
       const createdJob = await generateProject(startedFor, 'auto');
       if (!stillScoped(startedFor)) return;
       setJob(createdJob);
-      await pollJobUntilFinished(createdJob.job_id, (latest) => {
-        if (stillScoped(startedFor)) setJob(latest);
+      let pollCount = 0;
+      let refreshInFlight = false;
+      await pollJobUntilFinished(createdJob.job_id, async (latest) => {
+        if (!stillScoped(startedFor)) return;
+        setJob(latest);
+        pollCount += 1;
+        if (pollCount % 3 !== 0 || refreshInFlight) return;
+        refreshInFlight = true;
+        try {
+          const fresh = await getProject(startedFor);
+          if (stillScoped(startedFor)) setProject(fresh);
+        } catch {
+          // 同 mount effect：静默单次失败。
+        } finally {
+          refreshInFlight = false;
+        }
       });
       if (!stillScoped(startedFor)) return;
       const updated = await getProject(startedFor);
@@ -395,8 +429,22 @@ export function WorkspacePage() {
       const createdJob = await regenerateImportStructure(startedFor);
       if (!stillScoped(startedFor)) return;
       setJob(createdJob);
-      await pollJobUntilFinished(createdJob.job_id, (latest) => {
-        if (stillScoped(startedFor)) setJob(latest);
+      let pollCount = 0;
+      let refreshInFlight = false;
+      await pollJobUntilFinished(createdJob.job_id, async (latest) => {
+        if (!stillScoped(startedFor)) return;
+        setJob(latest);
+        pollCount += 1;
+        if (pollCount % 3 !== 0 || refreshInFlight) return;
+        refreshInFlight = true;
+        try {
+          const fresh = await getProject(startedFor);
+          if (stillScoped(startedFor)) setProject(fresh);
+        } catch {
+          // 同 mount effect：静默单次失败。
+        } finally {
+          refreshInFlight = false;
+        }
       });
       if (!stillScoped(startedFor)) return;
       const updated = await getProject(startedFor);
@@ -502,11 +550,18 @@ export function WorkspacePage() {
             {(() => {
               const hasImages = project.slides.some((s) => s.image_url);
               const navDisabled = busy !== null || jobRunning;
-              const canOpenImagesWhileGenerating = hasImages && job?.kind === 'image_generation' && jobRunning;
+              // 只要 image_generation job 在跑就允许回生图页，不再要求 hasImages：
+              // 旧逻辑下用户在生图刚启动还没出第一张图时回工作台会被锁住，
+              // 但这正是用户最需要回去看进度的时机。
+              const imageJobRunning = jobRunning && job?.kind === 'image_generation';
               // 脏稿态下离开当前页会卸载组件让 draftPrompt 丢失，封死导航。
-              const imagesNavDisabled = (navDisabled && !canOpenImagesWhileGenerating) || isDirty;
+              const imagesNavDisabled = (navDisabled && !imageJobRunning) || isDirty;
               const exportNavDisabled = navDisabled || isDirty;
-              const imagesLabel = hasImages ? '查看图片' : '下一步：准备生图';
+              const imagesLabel = imageJobRunning
+                ? '查看生图进度'
+                : hasImages
+                  ? '查看图片'
+                  : '下一步：准备生图';
               const imagesBtn = <Button type="primary" icon={<PictureOutlined />} disabled={imagesNavDisabled}>{imagesLabel}</Button>;
               const exportBtn = <Button icon={<ExportOutlined />} disabled={exportNavDisabled}>批量导出提示词</Button>;
               return (
@@ -592,7 +647,7 @@ export function WorkspacePage() {
       <Row gutter={[24, 24]} align="stretch">
         <Col xs={24} lg={7} style={{ display: 'flex' }}>
           <Card
-            title={<><span style={{ marginRight: 8 }}>页数与大纲</span><Tag bordered={false}>共 {project.slides.length} 页</Tag></>}
+            title={<><span style={{ marginRight: 8 }}>页数与大纲</span>{renderSlideCountTag(project.slides.length, displayJob)}</>}
             bordered={false}
             style={{ borderRadius: 0, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', width: '100%', display: 'flex', flexDirection: 'column' }}
             bodyStyle={{ padding: 0, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 180px)', overflow: 'hidden' }}
@@ -955,6 +1010,20 @@ function SlideRow({ item, active, hasImage, disabled, onSelect, onInsertAfter, o
 
 function hasText(value?: string | null): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+// 流式阶段：generation / import_structure_generation 在跑且后端写了 total_slides 时，
+// 显示「生成中 N/total 页」让用户感知逐页落盘的节奏。
+// revise_inconsistent 不参与（不改变 slide 数量），其它 kind 兜底走静态计数。
+function renderSlideCountTag(slideCount: number, displayJob: JobResponse | null) {
+  const streamingKind = displayJob?.kind === 'generation' || displayJob?.kind === 'import_structure_generation';
+  const isRunning = displayJob?.status === 'running';
+  const total = displayJob?.total_slides;
+  if (streamingKind && isRunning && typeof total === 'number' && total > 0) {
+    const done = displayJob?.completed_slides ?? 0;
+    return <Tag bordered={false} color="processing">生成中 {done}/{total} 页</Tag>;
+  }
+  return <Tag bordered={false}>共 {slideCount} 页</Tag>;
 }
 
 function getSlideSummary(slide: ProjectData['slides'][number]): string {

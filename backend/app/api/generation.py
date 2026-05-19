@@ -70,16 +70,7 @@ async def generate_project(
     logger.info("[generation-job] created job_id={} project_id={} user_id={} mode={}", job.id, project_id, user_id, request.mode)
     job_service.update(job, stage="queued", progress=0.02, message="生成任务已创建", status="running")
     asyncio.create_task(_run_generation_job(job.id, project_id, request.mode, user_id))
-    return JobResponse(
-        job_id=job.id,
-        project_id=job.project_id,
-        kind=job.kind,
-        status=job.status,
-        stage=job.stage,
-        progress=job.progress,
-        message=job.message,
-        error=job.error,
-    )
+    return JobResponse.from_record(job)
 
 
 async def _run_generation_job(job_id: str, project_id: str, mode: str, user_id: int) -> None:
@@ -138,16 +129,7 @@ def get_active_job_for_project(
     job = JobService(session).get_active_job(project_id)
     if not job:
         return None
-    return JobResponse(
-        job_id=job.id,
-        project_id=job.project_id,
-        kind=job.kind,
-        status=job.status,
-        stage=job.stage,
-        progress=job.progress,
-        message=job.message,
-        error=job.error,
-    )
+    return JobResponse.from_record(job)
 
 
 @router.get("/api/jobs/{job_id}", response_model=JobResponse)
@@ -157,16 +139,7 @@ def get_job(
     user_id: int = Depends(get_current_user_id),
 ) -> JobResponse:
     job = _assert_job_owner(session, job_id, user_id)
-    return JobResponse(
-        job_id=job.id,
-        project_id=job.project_id,
-        kind=job.kind,
-        status=job.status,
-        stage=job.stage,
-        progress=job.progress,
-        message=job.message,
-        error=job.error,
-    )
+    return JobResponse.from_record(job)
 
 
 @router.post("/api/jobs/{job_id}/cancel", response_model=JobResponse)
@@ -177,7 +150,7 @@ def cancel_job(
 ) -> JobResponse:
     _assert_job_owner(session, job_id, user_id)
     job = JobService(session).cancel(job_id)
-    return JobResponse(job_id=job.id, project_id=job.project_id, kind=job.kind, status=job.status, stage=job.stage, progress=job.progress, message=job.message, error=job.error)
+    return JobResponse.from_record(job)
 
 
 @router.post("/api/projects/{project_id}/regenerate-outline", response_model=ProjectResponse)
@@ -251,16 +224,7 @@ async def revise_inconsistent_prompts(
     asyncio.create_task(_run_revise_job(
         job.id, project_id, request.threshold, request.max_rounds, request.slide_numbers, user_id,
     ))
-    return JobResponse(
-        job_id=job.id,
-        project_id=job.project_id,
-        kind=job.kind,
-        status=job.status,
-        stage=job.stage,
-        progress=job.progress,
-        message=job.message,
-        error=job.error,
-    )
+    return JobResponse.from_record(job)
 
 
 async def _run_revise_job(
@@ -338,16 +302,7 @@ async def regenerate_import_structure(
         job.id, project_id, user_id,
     )
     asyncio.create_task(run_import_structure_job(job.id, project_id, user_id))
-    return JobResponse(
-        job_id=job.id,
-        project_id=job.project_id,
-        kind=job.kind,
-        status=job.status,
-        stage=job.stage,
-        progress=job.progress,
-        message=job.message,
-        error=job.error,
-    )
+    return JobResponse.from_record(job)
 
 
 def _assert_no_active_job(session: Session, project_id: str) -> None:
@@ -432,16 +387,7 @@ async def generate_images(
             user_id,
         )
     )
-    return JobResponse(
-        job_id=job.id,
-        project_id=job.project_id,
-        kind=job.kind,
-        status=job.status,
-        stage=job.stage,
-        progress=job.progress,
-        message=job.message,
-        error=job.error,
-    )
+    return JobResponse.from_record(job)
 
 
 async def _run_image_generation_job(

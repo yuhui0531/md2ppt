@@ -83,13 +83,19 @@ class JobService:
             for pid in imported_to_revert:
                 ps.revert_import_structure_state(pid)
 
-    def update(self, job: JobRecord, *, stage: str, progress: float, message: str, status: str | None = None, error: str | None = None) -> None:
+    def update(self, job: JobRecord, *, stage: str, progress: float, message: str, status: str | None = None, error: str | None = None,
+               completed_slides: int | None = None, total_slides: int | None = None) -> None:
         job.stage = stage
         job.progress = progress
         job.message = message
         if status:
             job.status = status
         job.error = error
+        # 每次 update 都显式覆盖 completed_slides / total_slides，包括默认的 None：
+        # 这样跨阶段时（outline_generating → style_guide_generating）流式阶段的计数
+        # 不会作为残留显示在非流式阶段。流式 callback 会显式传具体 int 把它们撑起来。
+        job.completed_slides = completed_slides
+        job.total_slides = total_slides
         job.updated_at = datetime.now(timezone.utc)
         # 运行中任务会高频刷新进度；普通 tick 降到 debug，避免长任务刷满主日志。
         level = "DEBUG" if job.status == "running" else "INFO"

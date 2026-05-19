@@ -161,6 +161,10 @@ export interface JobResponse {
   progress?: number | null;
   message?: string | null;
   error?: string | null;
+  // 大纲 / 逐页 prompt 流式阶段后端会写入这两个计数，让前端工作台显示
+  // 「生成中 5/18 页」。非流式阶段为 null。
+  completed_slides?: number | null;
+  total_slides?: number | null;
 }
 
 export interface ExportResponse {

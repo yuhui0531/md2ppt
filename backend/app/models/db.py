@@ -186,6 +186,38 @@ def _apply_job_kind_migration() -> None:
         conn.close()
 
 
+def _needs_job_slide_counters_migration() -> bool:
+    db_path = settings.storage_dir / "app.db"
+    if not db_path.exists():
+        return False
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cursor = conn.execute("PRAGMA table_info(jobrecord)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if not columns:
+            return False
+        return "completed_slides" not in columns or "total_slides" not in columns
+    finally:
+        conn.close()
+
+
+def _apply_job_slide_counters_migration() -> None:
+    """给 jobrecord 加 completed_slides / total_slides 两列：流式阶段的逐页计数。
+    历史行没有这两个字段，保持 NULL；前端在 None 时回落到 project.slides.length。"""
+    db_path = settings.storage_dir / "app.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cursor = conn.execute("PRAGMA table_info(jobrecord)")
+        existing = {row[1] for row in cursor.fetchall()}
+        if "completed_slides" not in existing:
+            conn.execute("ALTER TABLE jobrecord ADD COLUMN completed_slides INTEGER")
+        if "total_slides" not in existing:
+            conn.execute("ALTER TABLE jobrecord ADD COLUMN total_slides INTEGER")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     (settings.storage_dir / "uploads").mkdir(parents=True, exist_ok=True)
@@ -209,6 +241,9 @@ def init_db() -> None:
 
     if _needs_job_kind_migration():
         _apply_job_kind_migration()
+
+    if _needs_job_slide_counters_migration():
+        _apply_job_slide_counters_migration()
 
     if _needs_project_origin_migration():
         _apply_project_origin_migration()

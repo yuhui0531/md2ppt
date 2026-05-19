@@ -18,5 +18,9 @@ class JobRecord(SQLModel, table=True):
     message: str = ""
     error: str | None = None
     cancel_requested: bool = False
+    # 大纲/逐页 prompt 流式阶段的逐页计数，供前端在「页数与大纲」面板上实时展示
+    # 「生成中 N/total 页」。非流式阶段保持 None，前端会回落到 project.slides.length。
+    completed_slides: int | None = None
+    total_slides: int | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

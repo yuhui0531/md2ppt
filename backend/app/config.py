@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     consistency_concurrency: int = Field(default=3, ge=1)
     # 单次评分 LLM 调用最多承载的页数；超过时分块并发。
     consistency_chunk_max_size: int = Field(default=6, ge=1)
+    # 逐页 prompt 生成的按页并发数：与 revise/consistency 同量级。每页一次 LLM
+    # 调用让模型独占注意力把 style_guide 硬规则落实到 prompt 里——批量调用下
+    # 中间页注意力被稀释、风格约束退化成泛化短语，是踩过的同款坑。
+    slide_prompt_concurrency: int = Field(default=3, ge=1)
     text_cap_brief: int = Field(default=3072, ge=1)
     text_cap_source_slide_constraint: int = Field(default=512, ge=1)
     text_cap_slide_count: int = Field(default=1024, ge=1)

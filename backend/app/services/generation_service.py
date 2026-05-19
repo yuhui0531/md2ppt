@@ -67,18 +67,40 @@ def _count_complete_slides(buffer: str) -> int:
     """Walk a partial JSON buffer character by character and count how many
     complete top-level objects exist inside the `"slides": [...]` array. Handles
     string literals and escapes; stops at the closing `]` or end of buffer.
-    Returns 0 if no `"slides"` array has started yet."""
+    Returns 0 if no `"slides"` array has started yet.
+
+    本 helper 只数完整 slide 个数（不抽出对象），保留原签名供仅关心计数的快速路径。
+    流式 callback 走 _scan_complete_slides 拿 (count, objects) 元组。"""
+    count, _ = _scan_complete_slides(buffer)
+    return count
+
+
+def _scan_complete_slides(buffer: str) -> tuple[int, list[dict]]:
+    """流式 callback 用：返回 (完整 slide 个数, 已成形 slide 对象列表)。
+
+    在 `"slides": [...]` 数组里逐字符扫描，每当深度回到 0 的 `}` 闭合一个对象时，
+    用 json.loads 解析对应字节区间。解析失败的对象（不应发生，但 LLM 偶发输出
+    含控制字符等异常）忽略，不破坏整体计数——这条 callback 的契约是『best effort
+    把已完成的页落盘』，单页坏掉等阶段末尾整批 LLM 输出兜底重写。
+
+    返回的对象顺序与 LLM 输出顺序一致（即 LLM 按 slide_no 1..N 输出时，列表也是
+    1..N 的顺序）。调用方靠 slide_no 而不是 list index 锚定，所以即便 LLM 乱序
+    输出（罕见）也不会写错页。"""
     key_idx = buffer.find('"slides"')
     if key_idx < 0:
-        return 0
+        return 0, []
     bracket_idx = buffer.find("[", key_idx)
     if bracket_idx < 0:
-        return 0
+        return 0, []
     count = 0
     depth = 0
     in_string = False
     escape = False
-    for ch in buffer[bracket_idx + 1:]:
+    object_start: int | None = None
+    objects: list[dict] = []
+    start = bracket_idx + 1
+    for offset, ch in enumerate(buffer[start:]):
+        absolute = start + offset
         if escape:
             escape = False
             continue
@@ -91,15 +113,27 @@ def _count_complete_slides(buffer: str) -> int:
         if ch == '"':
             in_string = True
         elif ch == "{":
+            if depth == 0:
+                object_start = absolute
             depth += 1
         elif ch == "}":
             if depth > 0:
                 depth -= 1
                 if depth == 0:
                     count += 1
+                    if object_start is not None:
+                        snippet = buffer[object_start:absolute + 1]
+                        try:
+                            parsed = json.loads(snippet)
+                        except (ValueError, json.JSONDecodeError):
+                            # 偶发坏数据不影响后续 slide 的累计；阶段末尾整批保存兜底。
+                            parsed = None
+                        if isinstance(parsed, dict):
+                            objects.append(parsed)
+                        object_start = None
         elif ch == "]" and depth == 0:
             break
-    return count
+    return count, objects
 
 
 class GenerationService:
@@ -746,6 +780,7 @@ class GenerationService:
             job_service, job, stage="outline_generating",
             base=0.36, span=0.16, expected=expected,
             message_fn=lambda done, total: f"正在生成大纲：{done}/{total or '?'} 页",
+            project_service=self.project_service, project_id=data.project_id, phase="outline",
         )
         payload = await self._call_json(
             "大纲生成",
@@ -784,24 +819,117 @@ class GenerationService:
             job: JobRecord | None = None,
             async_client: httpx.AsyncClient | None = None,
     ) -> list[Slide]:
+        """按页并发生成 prompt。每页一次 LLM 调用让模型独占注意力把 style_guide 硬规则
+        逐条落实到 slide.prompt 里——批量调用下中间页注意力被稀释、风格约束退化成泛化短语
+        是踩过的同款坑（参见 revise_inconsistent_prompts:335-337 / check_consistency:808-822
+        的迁移注释）。
+
+        与 revise 路径同款三件套：semaphore 限流 + state["done"]/state["failed"] 推进度 +
+        by_no 合并保留 id。单页失败时 log + 保留原 slide（empty prompt），由用户用「重生成
+        当前页」补；不让单页失败炸掉整个 job。
+
+        逐页持久化：每页成功后立刻 persist_streaming_slide("prompts", ...)，前端轮询能看到
+        prompt 行级出现——上次 streaming 任务搭好的 UI 基建（completed_slides/total_slides）
+        在这里复用，零前端改动。"""
         target_slides = [slide for slide in data.slides if not slide_numbers or slide.slide_no in slide_numbers]
-        on_partial = self._make_slide_progress_callback(
-            job_service, job, stage="prompts_generating",
-            base=0.68, span=0.16, expected=len(target_slides) or None,
-            message_fn=lambda done, total: f"正在生成逐页 Prompt：{done}/{total or '?'} 页",
-        )
-        payload = await self._call_json(
-            "逐页 prompt 生成",
-            SLIDE_PROMPTS_PROMPT,
-            self._slide_prompts_payload(data, target_slides),
-            on_partial=on_partial,
-            async_client=async_client,
-        )
-        generated = [Slide.model_validate(self._normalize_slide(slide)) for slide in payload.get("slides", [])]
-        if slide_numbers:
-            by_no = {slide.slide_no: slide for slide in generated}
-            return [by_no.get(slide.slide_no, slide) for slide in data.slides]
-        return generated
+        target_total = len(target_slides)
+        if target_total == 0:
+            # 空目标兜底：保留旧返回语义（partial 路径返回原 slides，full 路径不会进这里）。
+            return list(data.slides)
+
+        base_progress = 0.68
+        progress_span = 0.16
+        semaphore = asyncio.Semaphore(max(1, settings.slide_prompt_concurrency))
+        state: dict[str, Any] = {"done": 0, "failed": 0}
+        generated_by_no: dict[int, Slide] = {}
+
+        async def generate_one(target: Slide) -> None:
+            async with semaphore:
+                self._ensure_not_cancelled(job_service, job)
+                try:
+                    payload = await self._call_json(
+                        "逐页 prompt 生成",
+                        SLIDE_PROMPTS_PROMPT,
+                        self._slide_prompts_payload(data, [target]),
+                        async_client=async_client,
+                    )
+                    returned = payload.get("slides") or []
+                    if not returned:
+                        logger.warning(
+                            "[generation] slide-prompt slide={} returned 0 slides project_id={}",
+                            target.slide_no, data.project_id,
+                        )
+                        state["failed"] += 1
+                        return
+                    normalized = self._normalize_slide(returned[0])
+                    new_slide = Slide.model_validate(normalized)
+                    if new_slide.slide_no != target.slide_no:
+                        # LLM 偷改 slide_no——拒绝写入，与 revise 路径同款守卫。
+                        logger.warning(
+                            "[generation] slide-prompt slide={} LLM returned slide_no={} project_id={}",
+                            target.slide_no, new_slide.slide_no, data.project_id,
+                        )
+                        state["failed"] += 1
+                        return
+                    new_slide.id = target.id
+                    new_slide.image_url = target.image_url
+                    generated_by_no[target.slide_no] = new_slide
+                    # 逐页落盘让前端看到行级出现。失败仅 log 不阻塞主流程——run_generation
+                    # 阶段末尾 save_project_data 整批兜底（与 outline 阶段同款契约）。
+                    if job_service and job:
+                        try:
+                            # 强制把 slide_no 与保留的 id 写入 payload，防 normalize 没带；
+                            # persist_streaming_slide 的 prompts 阶段只更新 prompt 字段，
+                            # 但 slide_no 仍是定位键，必须存在。
+                            persist_payload = {**normalized, "slide_no": target.slide_no}
+                            self.project_service.persist_streaming_slide(
+                                data.project_id, "prompts", persist_payload,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "[generation] slide-prompt persist failed project_id={} slide_no={} error={}",
+                                data.project_id, target.slide_no, exc,
+                            )
+                except HTTPException:
+                    # _ensure_not_cancelled 抛 499 必须向外传播给 worker 标 cancelled；
+                    # 其它 HTTPException（模型配置缺失等）也保留原行为：往外抛由 worker 标 failed。
+                    raise
+                except Exception as exc:
+                    logger.exception(
+                        "[generation] slide-prompt slide={} call failed project_id={} error={}",
+                        target.slide_no, data.project_id, exc,
+                    )
+                    state["failed"] += 1
+                finally:
+                    state["done"] += 1
+                    if job_service and job:
+                        done_ratio = state["done"] / target_total
+                        progress = base_progress + done_ratio * progress_span
+                        suffix = f"（{state['failed']} 失败）" if state["failed"] else ""
+                        job_service.update(
+                            job, stage="prompts_generating", progress=progress,
+                            message=f"正在生成逐页 Prompt：{state['done']}/{target_total} 页{suffix}",
+                            status="running",
+                            completed_slides=state["done"], total_slides=target_total,
+                        )
+
+        await asyncio.gather(*(generate_one(s) for s in target_slides))
+        # 全部失败 → fail loud：用户期望「生成完成」时至少有一页 prompt 落地，
+        # 0/N 成功仍返回 200 是 Rule 12 违反。部分失败保持 soft-fail（与 revise 路径
+        # 一致，单页可用「重生成当前页」补救），全部失败则上抛由 worker 标 failed。
+        if state["failed"] >= target_total:
+            logger.warning(
+                "[generation] slide-prompt all slides failed project_id={} target_total={}",
+                data.project_id, target_total,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"全部 {target_total} 页 prompt 生成失败，请检查模型配置或稍后重试",
+            )
+        # 统一合并语义：全量与按页都按 data.slides 顺序输出，失败页保留原 slide
+        # （prompt 为空，由用户用「重生成当前页」补）。原 full 路径直接返回
+        # generated 会让失败页消失，与 partial 路径不一致——统一掉。
+        return [generated_by_no.get(s.slide_no, s) for s in data.slides]
 
     async def check_consistency(self, data: ProjectData, threshold: float | None = None,
                                 async_client: httpx.AsyncClient | None = None) -> ConsistencyReport:
@@ -1144,13 +1272,23 @@ class GenerationService:
             span: float,
             expected: int | None,
             message_fn: Callable[[int, int | None], str],
+            project_service: ProjectService | None = None,
+            project_id: str | None = None,
+            phase: str | None = None,
     ) -> Callable[[str], None] | None:
         if job_service is None or job is None:
             return None
-        state = {"last_done": 0}
+        # state["last_persisted_index"]：上次回调里已经写过 DB 的 objects 列表前缀长度。
+        # 每次 callback 拿到的 objects 是从头扫整个 buffer 得到的，前 N 个是上次已落盘的，
+        # 只对 [last_persisted_index:] 新增的逐条调 persist_streaming_slide。
+        # ⚠ done（来自 _count_complete_slides，含解析失败的对象数）与 len(slides_objs)
+        # （只统计解析成功的对象）可能因为偶发损坏 JSON 而分歧；slicing 用的是 objects
+        # 列表，不要拿 done 去索引 objects。
+        state = {"last_done": 0, "last_persisted_index": 0}
+        persist_enabled = project_service is not None and project_id is not None and phase in {"outline", "prompts"}
 
         def callback(buffer: str) -> None:
-            done = _count_complete_slides(buffer)
+            done, slides_objs = _scan_complete_slides(buffer)
             if done <= state["last_done"]:
                 return
             state["last_done"] = done
@@ -1160,7 +1298,29 @@ class GenerationService:
                 # 流式解析早期拿不到目标页数时，用一个保守常量驱动进度条，避免长时间卡在原地。
                 ratio = min(done / 12.0, 1.0)
             progress = base + ratio * span
-            cls._update_job(job_service, job, stage, progress, message_fn(done, expected))
+            # 流式回调直接调 job_service.update，把计数字段一并写入。不走静态 _update_job
+            # 是因为后者签名没有 counter 入参；让 _update_job 接 counter 反而会让其它非
+            # 流式调用点要逐个补参数。这条 callback 是计数字段的唯一权威写入点。
+            job_service.update(
+                job, stage=stage, progress=progress,
+                message=message_fn(done, expected), status="running",
+                completed_slides=done, total_slides=expected,
+            )
+            if not persist_enabled:
+                return
+            # 把 [last_persisted_index:] 的新 slide 逐条落盘。每条单独 try 一次：
+            # 单条失败不阻断后续，且 callback 自身永远不能往上抛——会中断 LLM 流。
+            new_objects = slides_objs[state["last_persisted_index"]:]
+            for raw in new_objects:
+                try:
+                    normalized = cls._normalize_slide(raw)
+                    project_service.persist_streaming_slide(project_id, phase, normalized)
+                except Exception as exc:
+                    logger.warning(
+                        "[generation] streaming persist failed project_id={} phase={} slide_no={} error={}",
+                        project_id, phase, raw.get("slide_no"), exc,
+                    )
+            state["last_persisted_index"] = len(slides_objs)
 
         return callback
 

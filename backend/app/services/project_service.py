@@ -121,16 +121,7 @@ class ProjectService:
                 and all(isinstance(s, dict) and s.get("image_url") for s in slides)
             )
             active_job_record = active_by_project.get(record.id)
-            active_job = JobResponse(
-                job_id=active_job_record.id,
-                project_id=active_job_record.project_id,
-                kind=active_job_record.kind,
-                status=active_job_record.status,
-                stage=active_job_record.stage,
-                progress=active_job_record.progress,
-                message=active_job_record.message,
-                error=active_job_record.error,
-            ) if active_job_record else None
+            active_job = JobResponse.from_record(active_job_record) if active_job_record else None
             summaries.append(
                 ProjectSummary(
                     project_id=record.id,
@@ -156,6 +147,87 @@ class ProjectService:
         data = self._with_enforced_style_guide(data)
         self._ensure_record_title(record, data)
         record.generation_state = data.generation_state
+        record.data_json = data.model_dump_json()
+        record.updated_at = datetime.now(timezone.utc)
+        self.session.add(record)
+        self.session.commit()
+
+    def persist_streaming_slide(self, project_id: str, phase: str, slide_payload: dict) -> None:
+        """流式阶段中途落盘单页。供 generation_service 的 _make_slide_progress_callback
+        每解析出一个完整 slide 对象时调用，让前端在轮询周期里就能看到行级增长。
+
+        phase 语义：
+        - "outline": LLM 流出一个新 slide 对象 → 按 slide_no upsert 到 data.slides。
+          已存在的 slide_no 复用 id（避免 sld_xxx 漂移）；新 slide_no 用 default_factory 生成。
+        - "prompts": LLM 流出某页的新 prompt → 仅覆盖 prompt 字段；其它结构化字段保持
+          上一次 outline 阶段写入的内容。找不到对应 slide_no 时 silently skip（防御：
+          LLM 偶尔返回多余 slide_no，避免幽灵页污染 slides[]）。
+
+        slide_payload 期望调用方已经走过 GenerationService._normalize_slide，否则
+        LLM 偶发的 list-of-dict / dict-of-string 等非常规形态可能让 Slide.model_validate
+        抛错。本方法对此容错（try/except 跳过），但前置 normalize 能减少噪音。
+
+        与阶段末尾 save_project_data 的关系：阶段末尾仍会用完整 LLM 输出整批覆盖
+        data.slides——本方法只为「中途可见性」服务，最终一致性由阶段末次保存兜底。
+
+        Worker 与 API GET /projects/{id} 各自独立 session、独立 transaction；
+        SQLite/Postgres 的读写不阻塞，前端轮询期间能看到本方法 commit 后的最新状态。
+
+        **并发安全契约**：本方法在 generate_slide_prompts 的 asyncio.gather 下会被
+        多个 coroutine 调用，且 ProjectService 实例与外层 worker 共享同一个 Session。
+        安全前提是：本方法**全程同步、无 await**——asyncio 在没有 await 点时不会切换
+        coroutine，因此 read → modify → commit 序列对 asyncio 而言是原子的。若未来给
+        本方法加 await（例如改成 async 调用 LLM 校验），必须重新审视：要么加锁，要么
+        改成 collect-in-memory + 单点写盘。同款契约也适用于 revise_inconsistent_prompts
+        路径下的 job_service.update 调用。"""
+        slide_no = slide_payload.get("slide_no")
+        if not isinstance(slide_no, int) or slide_no < 1:
+            # LLM 偶发漏 slide_no 或返回浮点数：忽略此条，等下一个 token 重试。
+            return
+        record = self.session.get(ProjectRecord, project_id)
+        if not record:
+            return
+        try:
+            data = ProjectData.model_validate(json.loads(record.data_json))
+        except (ValueError, json.JSONDecodeError):
+            return
+
+        existing_by_no = {slide.slide_no: slide for slide in data.slides}
+        if phase == "outline":
+            existing = existing_by_no.get(slide_no)
+            try:
+                if existing is None:
+                    payload = {**slide_payload, "slide_no": slide_no}
+                    payload.setdefault("title", "")
+                    payload.setdefault("page_type", "")
+                    new_slide = Slide.model_validate(payload)
+                    data.slides.append(new_slide)
+                else:
+                    # 保留原 id：前端 SlideRow 与一致性 report 都按 id/slide_no 锚定。
+                    payload = {**slide_payload, "slide_no": slide_no, "id": existing.id}
+                    payload.setdefault("title", "")
+                    payload.setdefault("page_type", "")
+                    updated_slide = Slide.model_validate(payload)
+                    data.slides[data.slides.index(existing)] = updated_slide
+            except Exception:
+                # 单页 schema 验证失败不阻塞整批：阶段末次保存会用完整 LLM 输出兜底。
+                return
+            # outline 阶段 slide 应按 slide_no 自然递增；流式 callback 是按 LLM 输出
+            # 顺序触发的，append 顺序与 slide_no 顺序一致。若 LLM 乱序输出，按 slide_no
+            # 排序保证 UI 上行序与 slide_no 顺序一致。
+            data.slides.sort(key=lambda s: s.slide_no)
+        elif phase == "prompts":
+            existing = existing_by_no.get(slide_no)
+            if existing is None:
+                return
+            new_prompt = slide_payload.get("prompt")
+            if not isinstance(new_prompt, str):
+                return
+            existing.prompt = new_prompt
+        else:
+            return
+
+        data = self._with_enforced_style_guide(data)
         record.data_json = data.model_dump_json()
         record.updated_at = datetime.now(timezone.utc)
         self.session.add(record)

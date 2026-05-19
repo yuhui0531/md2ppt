@@ -68,16 +68,7 @@ async def import_prompts(
     return ImportPromptsResponse(
         project_id=data.project_id,
         generation_state=data.generation_state,
-        job=JobResponse(
-            job_id=job.id,
-            project_id=job.project_id,
-            kind=job.kind,
-            status=job.status,
-            stage=job.stage,
-            progress=job.progress,
-            message=job.message,
-            error=job.error,
-        ),
+        job=JobResponse.from_record(job),
     )
 
 
