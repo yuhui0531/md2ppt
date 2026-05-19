@@ -120,6 +120,22 @@ class ProjectService:
                 and isinstance(slides, list)
                 and all(isinstance(s, dict) and s.get("image_url") for s in slides)
             )
+            # consistency_passed：跑过检查 + 当前快照下无任何 slide 仍需修正。
+            # 用 payload 里的 consistency_report.slides 而不是 record.generation_state——
+            # 导入型项目 state 永远停在 import_structure_generated（避免污染生命周期标签），
+            # 但用户跑过修正后理应在列表页看到「一致性」步打勾。也不用 slide 自身的
+            # revision_needed 字段：那条字段只在 check_consistency 里被同步写入，
+            # consistency_report.slides[*].revision_needed 才是单一真相来源（revise
+            # 路径 generation_service.py:325-332 已基于当前 threshold 归一化过）。
+            report = payload.get("consistency_report") if isinstance(payload, dict) else None
+            report_slides = report.get("slides") if isinstance(report, dict) else None
+            consistency_passed = (
+                isinstance(report_slides, list)
+                and len(report_slides) > 0
+                and not any(
+                    isinstance(s, dict) and s.get("revision_needed") for s in report_slides
+                )
+            )
             active_job_record = active_by_project.get(record.id)
             active_job = JobResponse.from_record(active_job_record) if active_job_record else None
             summaries.append(
@@ -135,6 +151,7 @@ class ProjectService:
                     updated_at=record.updated_at.isoformat(),
                     active_job=active_job,
                     images_ready=images_ready,
+                    consistency_passed=consistency_passed,
                 )
             )
         return summaries

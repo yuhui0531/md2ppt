@@ -150,6 +150,7 @@ export interface ProjectSummary {
   updated_at: string;
   active_job?: JobResponse | null;
   images_ready?: boolean;
+  consistency_passed?: boolean;
 }
 
 export interface JobResponse {

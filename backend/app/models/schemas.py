@@ -198,6 +198,11 @@ class ProjectSummary(BaseModel):
     # 没有该字段就无法把生图步从 process 切到 finish，会让用户看到「生图刚跑完
     # 又变成 wait」的错乱。
     images_ready: bool = False
+    # 一致性是否「跑过且全部达标」：consistency_report 存在 + 无 slide revision_needed。
+    # 列表页 Steps 据此点亮「一致性」步的 finish 终态，与 generation_state 解耦——
+    # 导入型项目永远停在 import_structure_generated，但用户跑完一致性检查 + 修正
+    # 后应当能看到「一致性」步打勾。截图反馈中的「修正完成但列表仍标红」即此 bug。
+    consistency_passed: bool = False
 
 
 class ProjectListResponse(BaseModel):

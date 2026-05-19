@@ -92,6 +92,11 @@ export function projectProgress(project: ProjectSummary): ProjectStep[] {
     let status: StepStatus;
     if (processingIndex === index) status = 'process';
     else if (completionLevel >= step.completedAt) status = 'finish';
+    // 「一致性」步：generation_state 不一定能反映真实达标情况——导入型项目永远停在
+    // import_structure_generated，但用户可能已跑过检查 + 修正。consistency_passed
+    // 由后端按 consistency_report.slides 当前快照判定（跑过 + 全部达标），与
+    // generation_state 解耦。
+    else if (step.key === 'consistency' && project.consistency_passed) status = 'finish';
     // 「生图」步没有对应 generation_state，靠后端 images_ready 字段点亮 finish，
     // 否则 image_generation job 跑完后 active_job 变 None 会让生图步又回 wait。
     else if (step.key === 'images' && project.images_ready) status = 'finish';
