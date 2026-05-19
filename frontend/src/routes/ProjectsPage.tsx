@@ -310,7 +310,6 @@ export function ProjectsPage() {
                   items={projectProgress(project).map((step) => ({
                     title: step.title,
                     status: step.status,
-                    description: step.description,
                     icon: step.status === 'process' ? <LoadingOutlined /> : undefined,
                   }))}
                   style={{ marginBottom: 12 }}
@@ -322,6 +321,12 @@ export function ProjectsPage() {
                   <Tag bordered={false}>{projectStateLabel(project.generation_state)}</Tag>
                   <Text type="secondary" style={{ fontSize: 13 }}>{project.slide_count} 页</Text>
                   <Text type="secondary" style={{ fontSize: 13 }}>更新于 {formatDateTime(project.updated_at)}</Text>
+                  {(() => {
+                    const active = projectProgress(project).find((s) => s.status === 'process' && s.description);
+                    return active ? (
+                      <Text type="secondary" style={{ fontSize: 13 }}>{active.description}</Text>
+                    ) : null;
+                  })()}
                 </Space>
               </div>
             </List.Item>
