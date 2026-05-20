@@ -940,6 +940,7 @@ export function WorkspacePage() {
                 activeKey={detailView === 'preview' ? 'prompt' : detailView}
                 onChange={setDetailView}
                 onTabClick={(key) => { if (key === 'prompt' && detailView === 'preview') setDetailView('prompt'); }}
+                tabBarStyle={{ borderBottom: 'none' }}
                 items={[
                   { key: 'prompt', label: 'Prompt' },
                   { key: 'speech_script', label: '讲解稿' },
@@ -951,11 +952,12 @@ export function WorkspacePage() {
             <div style={{ flex: 1, minHeight: 520, background: '#f8fafc', borderRadius: 0, border: '1px solid #e2e8f0', padding: 0, overflow: 'auto' }}>
               {(detailView === 'prompt' || detailView === 'preview') && (
                 <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 8px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-start', padding: '0 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
                     <Tabs
                       activeKey={detailView === 'preview' ? 'preview' : 'edit'}
                       onChange={(key) => setDetailView(key === 'preview' ? 'preview' : 'prompt')}
                       size="small"
+                      tabBarStyle={{ borderBottom: 'none' }}
                       items={[
                         { key: 'edit', label: '编辑' },
                         { key: 'preview', label: '预览' },
