@@ -660,6 +660,22 @@ export function WorkspacePage() {
                   {importJobRunning ? '结构补全中…' : '重新解析页面结构'}
                 </Button>
               </Popconfirm>
+              <Popconfirm
+                title="重新生成全部讲解稿"
+                description="会按当前大纲重写所有页的讲解稿，覆盖你手动编辑过的讲解稿。确定继续？"
+                okText="确定重生成"
+                cancelText="取消"
+                onConfirm={handleRegenerateAllSpeechScripts}
+                disabled={actionsLocked}
+              >
+                <Button
+                  icon={<SyncOutlined />}
+                  disabled={actionsLocked}
+                  loading={busy === BUSY.regenerateAllSpeechScripts || speechScriptsRegenJobRunning}
+                >
+                  {speechScriptsRegenJobRunning ? '讲解稿重生成中…' : '重新生成全部讲解稿'}
+                </Button>
+              </Popconfirm>
             ) : (
               <>
                 <Popconfirm
@@ -916,36 +932,56 @@ export function WorkspacePage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
                 <Title level={5} style={{ margin: 0 }}>当前页工作区</Title>
-                <Text type="secondary" style={{ fontSize: 12 }}>Prompt、讲解稿与预览切换查看</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>Prompt 编辑与讲解稿切换查看</Text>
               </div>
               <Tabs
-                activeKey={detailView}
+                activeKey={detailView === 'preview' ? 'prompt' : detailView}
                 onChange={setDetailView}
+                onTabClick={(key) => { if (key === 'prompt' && detailView === 'preview') setDetailView('prompt'); }}
                 items={[
                   { key: 'prompt', label: 'Prompt' },
                   { key: 'speech_script', label: '讲解稿' },
-                  { key: 'preview', label: '预览' },
                 ]}
                 style={{ marginBottom: 0 }}
               />
             </div>
 
-            <div style={{ flex: 1, minHeight: 520, background: '#f8fafc', borderRadius: 0, border: '1px solid #e2e8f0', padding: detailView === 'prompt' || detailView === 'speech_script' ? 0 : 16, overflow: 'auto' }}>
-              {detailView === 'prompt' && (
-                <TextArea
-                  value={draftPrompt}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setDraftPrompt(value);
-                    // 不能 sticky-true：用户敲完又删回 slide.prompt 时 ref 必须落回 false，
-                    // 否则后续外部 setProject 落地时 sync effect 会拒绝同步，
-                    // 等外部 prompt 改成第三个值时 isDirty 借尸还魂、按钮回来、
-                    // 用户一保存就会用陈旧 draft 覆盖掉外部更新。
-                    userEditedRef.current = value !== (slide?.prompt ?? '');
-                  }}
-                  disabled={!slide || mutationDisabled}
-                  style={{ height: '100%', minHeight: 520, resize: 'none', border: 'none', background: 'transparent', padding: 16, fontFamily: 'monospace' }}
-                />
+            <div style={{ flex: 1, minHeight: 520, background: '#f8fafc', borderRadius: 0, border: '1px solid #e2e8f0', padding: 0, overflow: 'auto' }}>
+              {(detailView === 'prompt' || detailView === 'preview') && (
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 8px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                    <Tabs
+                      activeKey={detailView === 'preview' ? 'preview' : 'edit'}
+                      onChange={(key) => setDetailView(key === 'preview' ? 'preview' : 'prompt')}
+                      size="small"
+                      items={[
+                        { key: 'edit', label: '编辑' },
+                        { key: 'preview', label: '预览' },
+                      ]}
+                      style={{ marginBottom: 0 }}
+                    />
+                  </div>
+                  {detailView === 'preview' ? (
+                    <div style={{ flex: 1, padding: 16, overflow: 'auto' }}>
+                      <MarkdownPreview content={draftPrompt} />
+                    </div>
+                  ) : (
+                    <TextArea
+                      value={draftPrompt}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setDraftPrompt(value);
+                        // 不能 sticky-true：用户敲完又删回 slide.prompt 时 ref 必须落回 false，
+                        // 否则后续外部 setProject 落地时 sync effect 会拒绝同步，
+                        // 等外部 prompt 改成第三个值时 isDirty 借尸还魂、按钮回来、
+                        // 用户一保存就会用陈旧 draft 覆盖掉外部更新。
+                        userEditedRef.current = value !== (slide?.prompt ?? '');
+                      }}
+                      disabled={!slide || mutationDisabled}
+                      style={{ flex: 1, height: '100%', minHeight: 480, resize: 'none', border: 'none', background: 'transparent', padding: 16, fontFamily: 'monospace' }}
+                    />
+                  )}
+                </div>
               )}
               {detailView === 'speech_script' && (
                 slide && !slide.speech_script && !isScriptDirty ? (
@@ -986,7 +1022,6 @@ export function WorkspacePage() {
                   />
                 )
               )}
-              {detailView === 'preview' && <MarkdownPreview content={draftPrompt} />}
               {detailView === 'detail' && slide && (
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                   {slideMetaItems.length > 0 && (
