@@ -84,6 +84,8 @@ function stageLabel(stage?: string | null): string {
     brief_generating: '理解素材',
     slide_count_recommending: '推荐页数',
     outline_generating: '生成大纲',
+    speech_scripts_generating: '生成讲解稿',
+    speech_scripts_generated: '讲解稿已生成',
     style_guide_generating: '生成视觉规范',
     prompts_generating: '生成逐页 Prompt',
     consistency_checking: '检查一致性',

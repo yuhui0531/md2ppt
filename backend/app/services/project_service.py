@@ -241,6 +241,14 @@ class ProjectService:
             if not isinstance(new_prompt, str):
                 return
             existing.prompt = new_prompt
+        elif phase == "speech_scripts":
+            existing = existing_by_no.get(slide_no)
+            if existing is None:
+                return
+            new_script = slide_payload.get("speech_script")
+            if not isinstance(new_script, str):
+                return
+            existing.speech_script = new_script
         else:
             return
 
@@ -396,6 +404,15 @@ class ProjectService:
             raise HTTPException(status_code=404, detail="未找到指定的页面")
         slide.prompt = prompt
         data.consistency_report = None
+        self.save_project_data(data)
+        return data
+
+    def update_slide_speech_script(self, project_id: str, slide_id: str, speech_script: str) -> ProjectData:
+        data = self.get_project_data_internal(project_id)
+        slide = next((s for s in data.slides if s.id == slide_id), None)
+        if slide is None:
+            raise HTTPException(status_code=404, detail="未找到指定的页面")
+        slide.speech_script = speech_script
         self.save_project_data(data)
         return data
 

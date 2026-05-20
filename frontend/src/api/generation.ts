@@ -45,6 +45,20 @@ export function regenerateAllPromptsJob(projectId: string): Promise<JobResponse>
   });
 }
 
+export function regenerateAllSpeechScriptsJob(projectId: string): Promise<JobResponse> {
+  return api(`/api/projects/${projectId}/regenerate-speech-scripts-job`, {
+    method: 'POST',
+    body: JSON.stringify({ slide_numbers: null }),
+  });
+}
+
+export function regenerateOneSpeechScriptJob(projectId: string, slideNo: number): Promise<JobResponse> {
+  return api(`/api/projects/${projectId}/regenerate-speech-scripts-job`, {
+    method: 'POST',
+    body: JSON.stringify({ slide_numbers: [slideNo] }),
+  });
+}
+
 export async function checkConsistency(projectId: string, threshold: number): Promise<ProjectData> {
   const response = await api<{ project: ProjectData }>(`/api/projects/${projectId}/check-consistency`, {
     method: 'POST',
@@ -80,6 +94,14 @@ export async function updateSlidePrompt(projectId: string, slideId: string, prom
   const response = await api<{ project: ProjectData }>(`/api/projects/${projectId}/slides/${slideId}`, {
     method: 'PATCH',
     body: JSON.stringify({ prompt }),
+  });
+  return response.project;
+}
+
+export async function updateSlideSpeechScript(projectId: string, slideId: string, speechScript: string): Promise<ProjectData> {
+  const response = await api<{ project: ProjectData }>(`/api/projects/${projectId}/slides/${slideId}/speech-script`, {
+    method: 'PATCH',
+    body: JSON.stringify({ speech_script: speechScript }),
   });
   return response.project;
 }

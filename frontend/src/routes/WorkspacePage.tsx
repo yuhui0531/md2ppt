@@ -8,11 +8,14 @@ import {
   getActiveJob,
   insertSlide,
   regenerateAllPromptsJob,
+  regenerateAllSpeechScriptsJob,
   regenerateImportStructure,
+  regenerateOneSpeechScriptJob,
   regenerateOutline,
   regeneratePrompts,
   reviseInconsistentPrompts,
   updateSlidePrompt,
+  updateSlideSpeechScript,
 } from '../api/generation';
 import { getProject } from '../api/projects';
 import { ConsistencyReportView } from '../components/ConsistencyReportView';
@@ -53,11 +56,14 @@ const BUSY = {
   regenerateOutline: 'regenerate-outline',
   regenerateImportStructure: 'regenerate-import-structure',
   regenerateAllPrompts: 'regenerate-all-prompts',
+  regenerateAllSpeechScripts: 'regenerate-all-speech-scripts',
   regenerateCurrent: 'regenerate-current',
+  regenerateCurrentSpeechScript: 'regenerate-current-speech-script',
   checkConsistency: 'check-consistency',
   reviseInconsistent: 'revise-inconsistent',
   reviseInconsistentAll: 'revise-inconsistent-all',
   savePrompt: 'save-prompt',
+  saveSpeechScript: 'save-speech-script',
   insertSlide: 'insert-slide',
   deleteSlide: 'delete-slide',
 } as const;
@@ -80,6 +86,7 @@ export function WorkspacePage() {
   const [message, setMessage] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(null);
   // 中栏 prompt 编辑草稿：和当前选中 slide 解耦，切换 slide 或外部更新 prompt 时同步。
   const [draftPrompt, setDraftPrompt] = useState<string>('');
+  const [draftSpeechScript, setDraftSpeechScript] = useState<string>('');
   // 插入新页的模态框：mode 区分"在某页之后"/"末尾追加"/"空白项目首页"，
   // 避免靠 anchorLabel 字符串拼出"在末尾之后"这种语病。
   const [insertModal, setInsertModal] = useState<InsertModalState>(
@@ -169,12 +176,13 @@ export function WorkspacePage() {
 
   // 任务是否在跑（任意类型）：用于禁用所有会和后台并发写 ProjectData 的按钮。
   const jobRunning = job?.status === 'running';
-  // 当前页只接管 PPT 生成 / 结构补全 / 风格修正进度的展示；其它类型的任务在自己的页面显示。
-  // revise_inconsistent 从工作台触发，进度条 + 取消按钮都挂在这里。
+  // 当前页只接管工作台内触发的任务进度展示；image_generation 在生图页展示。
   const displayJob = job && (
     job.kind === 'generation'
     || job.kind === 'import_structure_generation'
     || job.kind === 'revise_inconsistent'
+    || job.kind === 'prompts_regeneration'
+    || job.kind === 'speech_scripts_regeneration'
   ) ? job : null;
 
   // 选中页变化 / 外部更新该页 prompt 时同步草稿。注意此 effect 必须放在 early return 之前。
@@ -184,23 +192,30 @@ export function WorkspacePage() {
   // （后者在外部 prompt 变化的渲染瞬间会误判为 dirty）。
   const activeSlideObj = project?.slides[activeSlide];
   const userEditedRef = useRef(false);
+  const userEditedScriptRef = useRef(false);
   const prevSlideIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     const newPrompt = activeSlideObj?.prompt ?? '';
+    const newScript = activeSlideObj?.speech_script ?? '';
     const newId = activeSlideObj?.id;
     const switchedSlide = newId !== prevSlideIdRef.current;
     prevSlideIdRef.current = newId;
     if (switchedSlide) {
       // 切 slide：trySwitchActiveSlide 已处理脏稿确认，这里无条件同步。
       setDraftPrompt(newPrompt);
+      setDraftSpeechScript(newScript);
       userEditedRef.current = false;
+      userEditedScriptRef.current = false;
       return;
     }
     if (!userEditedRef.current) {
       setDraftPrompt(newPrompt);
     }
-    // 否则同一 slide + 用户已编辑 → 保留 draft，外部 prompt 更新被静默吞掉。
-  }, [activeSlideObj?.id, activeSlideObj?.prompt]);
+    if (!userEditedScriptRef.current) {
+      setDraftSpeechScript(newScript);
+    }
+    // 否则同一 slide + 用户已编辑 → 保留 draft，外部更新被静默吞掉。
+  }, [activeSlideObj?.id, activeSlideObj?.prompt, activeSlideObj?.speech_script]);
 
   async function refreshWith(action: () => Promise<ProjectData>, key: string, successText: string) {
     if (!project) return;
@@ -316,9 +331,13 @@ export function WorkspacePage() {
   const slide = project.slides[activeSlide];
   const isImported = project.project_origin === 'imported_prompts';
   const canResume = !isImported && !['consistency_checked', 'revised'].includes(project.generation_state);
-  const isDirty = slide ? draftPrompt !== slide.prompt : false;
+  const isPromptDirty = slide ? draftPrompt !== slide.prompt : false;
+  const isScriptDirty = slide ? draftSpeechScript !== (slide.speech_script ?? '') : false;
+  const currentDraftDirty = detailView === 'speech_script' ? isScriptDirty : isPromptDirty;
+  const isDirty = isPromptDirty || isScriptDirty;
   const importJobRunning = jobRunning && job?.kind === 'import_structure_generation';
   const promptsRegenJobRunning = jobRunning && job?.kind === 'prompts_regeneration';
+  const speechScriptsRegenJobRunning = jobRunning && job?.kind === 'speech_scripts_regeneration';
   // 任意 job 在跑都禁止写 ProjectData——update_slide_prompt 是"读整份→改一项→整包写"，
   // 与 worker 整包写之间会发生 lost update。在做到细粒度更新前，所有 mutation 都收紧。
   const mutationDisabled = busy !== null || jobRunning;
@@ -350,7 +369,7 @@ export function WorkspacePage() {
       return;
     }
     Modal.confirm({
-      title: '当前页 prompt 有未保存的修改',
+      title: '当前页有未保存的修改',
       content: '切换到其它页将放弃这些修改，是否继续？',
       okText: '放弃修改并切换',
       cancelText: '留在本页',
@@ -370,7 +389,32 @@ export function WorkspacePage() {
     }, BUSY.savePrompt, '已保存修改');
   }
 
+  async function handleSaveSpeechScript() {
+    if (!project || !slide) return;
+    const targetSlideId = slide.id;
+    await refreshWith(async () => {
+      const updated = await updateSlideSpeechScript(project.project_id, targetSlideId, draftSpeechScript);
+      const idx = updated.slides.findIndex((s) => s.id === targetSlideId);
+      if (idx >= 0) setActiveSlide(idx);
+      userEditedScriptRef.current = false;
+      return updated;
+    }, BUSY.saveSpeechScript, '已保存讲解稿');
+  }
+
+  function handleSaveCurrentDraft() {
+    if (detailView === 'speech_script') {
+      void handleSaveSpeechScript();
+      return;
+    }
+    void handleSavePrompt();
+  }
+
   function handleDiscardDraft() {
+    if (detailView === 'speech_script') {
+      setDraftSpeechScript(slide?.speech_script ?? '');
+      userEditedScriptRef.current = false;
+      return;
+    }
     setDraftPrompt(slide?.prompt ?? '');
     userEditedRef.current = false;
   }
@@ -457,6 +501,67 @@ export function WorkspacePage() {
     } finally {
       if (stillScoped(startedFor)) setBusy(null);
     }
+  }
+
+  async function runSpeechScriptJob(createJob: () => Promise<JobResponse>, busyKey: string, successText: string) {
+    if (!project) return;
+    if (jobRunning) return;
+    const startedFor = project.project_id;
+    setBusy(busyKey);
+    setMessage(null);
+    setJob(null);
+    try {
+      const createdJob = await createJob();
+      if (!stillScoped(startedFor)) return;
+      setJob(createdJob);
+      let pollCount = 0;
+      let refreshInFlight = false;
+      await pollJobUntilFinished(createdJob.job_id, async (latest) => {
+        if (!stillScoped(startedFor)) return;
+        setJob(latest);
+        pollCount += 1;
+        if (pollCount % 3 !== 0 || refreshInFlight) return;
+        refreshInFlight = true;
+        try {
+          const fresh = await getProject(startedFor);
+          if (stillScoped(startedFor)) setProject(fresh);
+        } catch {
+          // 与 prompt 重生成一致：静默单次失败。
+        } finally {
+          refreshInFlight = false;
+        }
+      });
+      if (!stillScoped(startedFor)) return;
+      const updated = await getProject(startedFor);
+      if (!stillScoped(startedFor)) return;
+      setProject(updated);
+      userEditedScriptRef.current = false;
+      setMessage({ kind: 'success', text: successText });
+    } catch (error) {
+      if (!stillScoped(startedFor)) return;
+      setMessage({ kind: 'error', text: error instanceof Error ? error.message : '讲解稿重生成失败' });
+    } finally {
+      if (stillScoped(startedFor)) setBusy(null);
+    }
+  }
+
+  function handleRegenerateCurrentSpeechScript() {
+    if (!project || !slide) return;
+    const slideNo = slide.slide_no;
+    void runSpeechScriptJob(
+      () => regenerateOneSpeechScriptJob(project.project_id, slideNo),
+      BUSY.regenerateCurrentSpeechScript,
+      `第 ${slideNo} 页讲解稿已重新生成`,
+    );
+  }
+
+  function handleRegenerateAllSpeechScripts() {
+    if (!project) return;
+    void runSpeechScriptJob(
+      () => regenerateAllSpeechScriptsJob(project.project_id),
+      BUSY.regenerateAllSpeechScripts,
+      '已重新生成全部讲解稿',
+    );
   }
 
   async function handleRegenerateImportStructure() {
@@ -591,6 +696,22 @@ export function WorkspacePage() {
                     {promptsRegenJobRunning ? '重生成中…' : '重新生成全部 prompt'}
                   </Button>
                 </Popconfirm>
+                <Popconfirm
+                  title="重新生成全部讲解稿"
+                  description="会按当前大纲重写所有页的讲解稿，覆盖你手动编辑过的讲解稿。确定继续？"
+                  okText="确定重生成"
+                  cancelText="取消"
+                  onConfirm={handleRegenerateAllSpeechScripts}
+                  disabled={actionsLocked}
+                >
+                  <Button
+                    icon={<SyncOutlined />}
+                    disabled={actionsLocked}
+                    loading={busy === BUSY.regenerateAllSpeechScripts || speechScriptsRegenJobRunning}
+                  >
+                    {speechScriptsRegenJobRunning ? '讲解稿重生成中…' : '重新生成全部讲解稿'}
+                  </Button>
+                </Popconfirm>
               </>
             )}
             {(() => {
@@ -600,7 +721,7 @@ export function WorkspacePage() {
               // 旧逻辑下用户在生图刚启动还没出第一张图时回工作台会被锁住，
               // 但这正是用户最需要回去看进度的时机。
               const imageJobRunning = jobRunning && job?.kind === 'image_generation';
-              // 脏稿态下离开当前页会卸载组件让 draftPrompt 丢失，封死导航。
+              // 脏稿态下离开当前页会卸载组件让 draft 丢失，封死导航。
               const imagesNavDisabled = (navDisabled && !imageJobRunning) || isDirty;
               const exportNavDisabled = navDisabled || isDirty;
               const imagesLabel = imageJobRunning
@@ -624,13 +745,12 @@ export function WorkspacePage() {
       {message && (
         <Alert message={message.text} type={message.kind === 'error' ? 'error' : (message.kind === 'success' ? 'success' : 'info')} showIcon />
       )}
+      {/* Prompt / speech script regeneration jobs are cancelable; generation/import stay non-cancelable here. */}
       <JobProgress
         job={displayJob}
         onCancel={
-          // 只对 revise_inconsistent job 暴露取消按钮。其它 job kind（生图 / 大纲生成 /
-          // 结构补全）目前没有 UI 入口取消，且生成 job 中途取消会留半生不熟的 generation_state，
-          // 暂不一并改造。
-          displayJob?.kind === 'revise_inconsistent' && displayJob.status === 'running'
+          displayJob?.status === 'running'
+          && ['revise_inconsistent', 'prompts_regeneration', 'speech_scripts_regeneration'].includes(displayJob.kind)
             ? async () => {
                 try {
                   await cancelJob(displayJob.job_id);
@@ -753,15 +873,15 @@ export function WorkspacePage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12 }}>
               <Title level={4} style={{ margin: 0 }}>{slide ? getCurrentSlideHeading(slide) : '当前页详情'}</Title>
               <Space>
-                {isDirty && (
+                {currentDraftDirty && (
                   <>
                     <Button
                       type="primary"
                       disabled={!slide || mutationDisabled}
-                      loading={busy === BUSY.savePrompt}
-                      onClick={handleSavePrompt}
+                      loading={busy === (detailView === 'speech_script' ? BUSY.saveSpeechScript : BUSY.savePrompt)}
+                      onClick={handleSaveCurrentDraft}
                     >
-                      保存修改
+                      {detailView === 'speech_script' ? '保存讲解稿' : '保存修改'}
                     </Button>
                     <Button
                       disabled={!slide || busy !== null}
@@ -771,7 +891,16 @@ export function WorkspacePage() {
                     </Button>
                   </>
                 )}
-                {!isImported && (
+                {!isImported && detailView === 'speech_script' ? (
+                  <Button
+                    icon={<SyncOutlined />}
+                    disabled={!slide || mutationDisabled || isDirty}
+                    loading={busy === BUSY.regenerateCurrentSpeechScript || speechScriptsRegenJobRunning}
+                    onClick={handleRegenerateCurrentSpeechScript}
+                  >
+                    重生成讲解稿
+                  </Button>
+                ) : !isImported && (
                   <Button
                     icon={<SyncOutlined />}
                     disabled={!slide || mutationDisabled || isDirty}
@@ -786,21 +915,22 @@ export function WorkspacePage() {
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
-                <Title level={5} style={{ margin: 0 }}>Prompt 工作区</Title>
-                <Text type="secondary" style={{ fontSize: 12 }}>当前页内容与预览切换查看</Text>
+                <Title level={5} style={{ margin: 0 }}>当前页工作区</Title>
+                <Text type="secondary" style={{ fontSize: 12 }}>Prompt、讲解稿与预览切换查看</Text>
               </div>
               <Tabs
                 activeKey={detailView}
                 onChange={setDetailView}
                 items={[
                   { key: 'prompt', label: 'Prompt' },
+                  { key: 'speech_script', label: '讲解稿' },
                   { key: 'preview', label: '预览' },
                 ]}
                 style={{ marginBottom: 0 }}
               />
             </div>
 
-            <div style={{ flex: 1, minHeight: 520, background: '#f8fafc', borderRadius: 0, border: '1px solid #e2e8f0', padding: detailView === 'prompt' ? 0 : 16, overflow: 'auto' }}>
+            <div style={{ flex: 1, minHeight: 520, background: '#f8fafc', borderRadius: 0, border: '1px solid #e2e8f0', padding: detailView === 'prompt' || detailView === 'speech_script' ? 0 : 16, overflow: 'auto' }}>
               {detailView === 'prompt' && (
                 <TextArea
                   value={draftPrompt}
@@ -815,6 +945,29 @@ export function WorkspacePage() {
                   }}
                   disabled={!slide || mutationDisabled}
                   style={{ height: '100%', minHeight: 520, resize: 'none', border: 'none', background: 'transparent', padding: 16, fontFamily: 'monospace' }}
+                />
+              )}
+              {detailView === 'speech_script' && (
+                <TextArea
+                  value={draftSpeechScript}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setDraftSpeechScript(value);
+                    userEditedScriptRef.current = value !== (slide?.speech_script ?? '');
+                  }}
+                  disabled={!slide || mutationDisabled}
+                  placeholder="讲解稿生成中…"
+                  style={{
+                    height: '100%',
+                    minHeight: 520,
+                    resize: 'none',
+                    border: 'none',
+                    background: 'transparent',
+                    padding: 16,
+                    fontFamily: 'inherit',
+                    fontSize: 14,
+                    lineHeight: 1.8,
+                  }}
                 />
               )}
               {detailView === 'preview' && <MarkdownPreview content={draftPrompt} />}
@@ -1062,7 +1215,10 @@ function hasText(value?: string | null): value is string {
 // 显示「生成中 N/total 页」让用户感知逐页落盘的节奏。
 // revise_inconsistent 不参与（不改变 slide 数量），其它 kind 兜底走静态计数。
 function renderSlideCountTag(slideCount: number, displayJob: JobResponse | null) {
-  const streamingKind = displayJob?.kind === 'generation' || displayJob?.kind === 'import_structure_generation';
+  const streamingKind = displayJob?.kind === 'generation'
+    || displayJob?.kind === 'import_structure_generation'
+    || displayJob?.kind === 'prompts_regeneration'
+    || displayJob?.kind === 'speech_scripts_regeneration';
   const isRunning = displayJob?.status === 'running';
   const total = displayJob?.total_slides;
   if (streamingKind && isRunning && typeof total === 'number' && total > 0) {

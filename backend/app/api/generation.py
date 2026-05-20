@@ -15,8 +15,10 @@ from app.models.schemas import (
     ProjectResponse,
     RegenerateOutlineRequest,
     RegeneratePromptsRequest,
+    RegenerateSpeechScriptsRequest,
     ReviseInconsistentPromptsRequest,
     UpdateSlidePromptRequest,
+    UpdateSlideSpeechScriptRequest,
 )
 from app.services.generation_service import GenerationService
 from app.services.image_generation_service import ImageGenerationService
@@ -211,6 +213,31 @@ async def regenerate_prompts_job(
     return JobResponse.from_record(job)
 
 
+@router.post("/api/projects/{project_id}/regenerate-speech-scripts-job", response_model=JobResponse)
+async def regenerate_speech_scripts_job(
+    project_id: str,
+    request: RegenerateSpeechScriptsRequest,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> JobResponse:
+    _assert_project_owner(session, project_id, user_id)
+    job_service = JobService(session)
+    if job_service.has_active_job(project_id):
+        logger.warning(
+            "[regenerate-speech-scripts-job] create rejected project_id={} user_id={} reason=active_job",
+            project_id, user_id,
+        )
+        raise HTTPException(status_code=409, detail="当前项目已有正在执行的任务")
+    job = job_service.create_job(project_id, kind="speech_scripts_regeneration")
+    logger.info(
+        "[regenerate-speech-scripts-job] created job_id={} project_id={} user_id={} slide_numbers={}",
+        job.id, project_id, user_id, request.slide_numbers,
+    )
+    job_service.update(job, stage="queued", progress=0.0, message="讲解稿重生成任务已创建", status="running")
+    asyncio.create_task(_run_regenerate_speech_scripts_job(job.id, project_id, request.slide_numbers, user_id))
+    return JobResponse.from_record(job)
+
+
 async def _run_regenerate_prompts_job(job_id: str, project_id: str, user_id: int) -> None:
     with Session(engine) as session:
         job_service = JobService(session)
@@ -250,6 +277,50 @@ async def _run_regenerate_prompts_job(job_id: str, project_id: str, user_id: int
             )
             job_service.update(job, stage="failed", progress=job.progress,
                                message="重新生成失败", status="failed", error=str(exc))
+
+
+async def _run_regenerate_speech_scripts_job(
+    job_id: str,
+    project_id: str,
+    slide_numbers: list[int] | None,
+    user_id: int,
+) -> None:
+    with Session(engine) as session:
+        job_service = JobService(session)
+        job = job_service.get_job(job_id)
+        try:
+            await GenerationService(session, user_id).regenerate_speech_scripts(
+                project_id, slide_numbers=slide_numbers, job_service=job_service, job=job,
+            )
+            session.refresh(job)
+            if job.status != "cancelled":
+                job_service.update(job, stage="speech_scripts_generated", progress=1.0,
+                                   message="已重新生成讲解稿", status="completed")
+        except HTTPException as exc:
+            if exc.status_code == 499:
+                logger.info(
+                    "[regenerate-speech-scripts-job] cancelled job_id={} project_id={} user_id={}",
+                    job_id, project_id, user_id,
+                )
+                session.refresh(job)
+                if job.status != "cancelled":
+                    job_service.update(job, stage="cancelled", progress=job.progress,
+                                       message="任务已取消", status="cancelled")
+                return
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            logger.exception(
+                "[regenerate-speech-scripts-job] failed job_id={} project_id={} user_id={} stage={} status_code={} detail={}",
+                job_id, project_id, user_id, job.stage, exc.status_code, detail,
+            )
+            job_service.update(job, stage="failed", progress=job.progress,
+                               message="讲解稿重生成失败", status="failed", error=detail)
+        except Exception as exc:
+            logger.exception(
+                "[regenerate-speech-scripts-job] failed job_id={} project_id={} user_id={} stage={} error={}",
+                job_id, project_id, user_id, job.stage, exc,
+            )
+            job_service.update(job, stage="failed", progress=job.progress,
+                               message="讲解稿重生成失败", status="failed", error=str(exc))
 
 
 @router.post("/api/projects/{project_id}/check-consistency", response_model=ProjectResponse)
@@ -407,6 +478,20 @@ def update_slide_prompt(
     # 在没做细粒度更新前，这条承诺必须撤回。
     _assert_no_active_job(session, project_id)
     updated = ProjectService(session).update_slide_prompt(project_id, slide_id, request.prompt)
+    return ProjectResponse(project=updated)
+
+
+@router.patch("/api/projects/{project_id}/slides/{slide_id}/speech-script", response_model=ProjectResponse)
+def update_slide_speech_script(
+    project_id: str,
+    slide_id: str,
+    request: UpdateSlideSpeechScriptRequest,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+) -> ProjectResponse:
+    _assert_project_owner(session, project_id, user_id)
+    _assert_no_active_job(session, project_id)
+    updated = ProjectService(session).update_slide_speech_script(project_id, slide_id, request.speech_script)
     return ProjectResponse(project=updated)
 
 

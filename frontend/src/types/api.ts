@@ -102,6 +102,7 @@ export interface Slide {
   page_text: string[];
   source_refs: string[];
   prompt: string;
+  speech_script: string;
   style_consistency_score?: number | null;
   style_issues: string[];
   revision_needed: boolean;

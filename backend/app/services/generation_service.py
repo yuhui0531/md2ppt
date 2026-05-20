@@ -28,6 +28,7 @@ from app.core.prompts.revise import REVISE_PROMPT
 from app.core.prompts.slide_count import SLIDE_COUNT_PROMPT
 from app.core.prompts.slide_prompts import SLIDE_PROMPTS_PROMPT
 from app.core.prompts.source_slide_constraint import SOURCE_SLIDE_CONSTRAINT_PROMPT
+from app.core.prompts.speech_script import SPEECH_SCRIPT_PROMPT
 from app.core.prompts.style_guide import STYLE_GUIDE_PROMPT
 from app.models.job import JobRecord
 from app.models.model_config import ModelConfigRecord
@@ -202,7 +203,19 @@ class GenerationService:
                 start_state = data.generation_state
 
             if start_state == "outline_generated":
-                self._update_job(job_service, job, "style_guide_generating", 0.52, "正在让大模型生成统一视觉规范")
+                self._update_job(job_service, job, "speech_scripts_generating", 0.50, "正在生成讲解稿")
+                data.slides = await self.generate_speech_scripts(
+                    data, job_service=job_service, job=job,
+                    async_client=async_client,
+                    base_progress=0.50, progress_span=0.10,
+                )
+                data.generation_state = "speech_scripts_generated"
+                self.project_service.save_project_data(data)
+                self._ensure_not_cancelled(job_service, job)
+                start_state = data.generation_state
+
+            if start_state == "speech_scripts_generated":
+                self._update_job(job_service, job, "style_guide_generating", 0.60, "正在让大模型生成统一视觉规范")
                 data.style_guide = await self.generate_style_guide(data, async_client=async_client)
                 data.consistency_report = None
                 data.generation_state = "style_guide_generated"
@@ -211,7 +224,7 @@ class GenerationService:
                 start_state = data.generation_state
 
             if start_state == "style_guide_generated":
-                self._update_job(job_service, job, "prompts_generating", 0.68, "正在让大模型生成逐页 PPT 生图提示词")
+                self._update_job(job_service, job, "prompts_generating", 0.72, "正在让大模型生成逐页 PPT 生图提示词")
                 data.slides = await self.generate_slide_prompts(data, job_service=job_service, job=job,
                                                                 async_client=async_client)
                 data.consistency_report = None
@@ -292,9 +305,14 @@ class GenerationService:
                 # 部分重生时 LLM 返回的 slide 不带 id；保留原 id 才能让一致性
                 # 报告、图片、前端选中态在重生前后保持锚定。
                 replacement.id = original.id
+                # prompt 重生不触碰演讲稿；保留原有 speech_script。
+                if replacement.speech_script is None:
+                    replacement.speech_script = original.speech_script
                 merged.append(replacement)
             data.slides = merged
         else:
+            # 全量重生：generated 里的每页都由 generate_slide_prompts 拷回了 id/image_url/speech_script；
+            # 失败页直接保留 data.slides 里的原始对象，speech_script 天然不丢。
             data.slides = generated
         data.consistency_report = None
         data.generation_state = "prompts_generated"
@@ -482,8 +500,11 @@ class GenerationService:
                     # 同 regenerate_prompts：LLM 不知道 Slide.id，需要把原 id 写回。
                     # 一致性 payload 已剥离 image_url，必须从 original 拷回，
                     # 否则用户已生成的图会丢。
+                    # speech_script 同理：REVISE_PROMPT 只改 prompt，LLM 输出里不带
+                    # speech_script；显式拷回避免修正操作把已有讲解稿静默清空。
                     replacement.id = original.id
                     replacement.image_url = original.image_url
+                    replacement.speech_script = original.speech_script
                     merged.append(replacement)
                 data.slides = merged
                 if job_service is not None:
@@ -897,6 +918,9 @@ class GenerationService:
                         return
                     new_slide.id = target.id
                     new_slide.image_url = target.image_url
+                    # speech_script 不在 SLIDE_PROMPTS_PROMPT 的输出契约里，LLM 不会回传；
+                    # 不显式拷回会让"重生成 prompt"把已有讲解稿静默清空（数据丢失回归）。
+                    new_slide.speech_script = target.speech_script
                     generated_by_no[target.slide_no] = new_slide
                     # 逐页落盘让前端看到行级出现。失败仅 log 不阻塞主流程——run_generation
                     # 阶段末尾 save_project_data 整批兜底（与 outline 阶段同款契约）。
@@ -954,6 +978,155 @@ class GenerationService:
         # （prompt 为空，由用户用「重生成当前页」补）。原 full 路径直接返回
         # generated 会让失败页消失，与 partial 路径不一致——统一掉。
         return [generated_by_no.get(s.slide_no, s) for s in data.slides]
+
+    def _speech_script_payload(self, data: ProjectData, target: Slide) -> dict:
+        """组装单页讲解稿的 LLM 输入：当前页 + deck_brief + 前后页摘要。"""
+        slides_by_no = {s.slide_no: s for s in data.slides}
+        prev_slide = slides_by_no.get(target.slide_no - 1)
+        next_slide = slides_by_no.get(target.slide_no + 1)
+        return {
+            "slide": {
+                "slide_no": target.slide_no,
+                "title": target.title,
+                "page_type": target.page_type,
+                "page_role": target.page_role,
+                "core_message": target.core_message,
+                "modules": target.modules,
+                "page_text": target.page_text,
+            },
+            "deck_brief": data.deck_brief.model_dump(mode="json") if data.deck_brief else None,
+            "prev_slide": {"title": prev_slide.title, "core_message": prev_slide.core_message} if prev_slide else None,
+            "next_slide": {"title": next_slide.title, "core_message": next_slide.core_message} if next_slide else None,
+        }
+
+    async def generate_speech_scripts(
+            self,
+            data: ProjectData,
+            slide_numbers: list[int] | None = None,
+            job_service: JobService | None = None,
+            job: JobRecord | None = None,
+            async_client: httpx.AsyncClient | None = None,
+            base_progress: float = 0.50,
+            progress_span: float = 0.10,
+    ) -> list[Slide]:
+        """按页并发生成口语化讲解稿。
+        与 generate_slide_prompts 同款三件套：semaphore 限流 + state[done/failed] 推进度
+        + by_no 合并保留 id。单页失败 → log + 保留原 slide.speech_script（空字符串）。
+        讲解稿不参与一致性检查，不影响 generation_state 主生成态。"""
+        target_slides = [slide for slide in data.slides if not slide_numbers or slide.slide_no in slide_numbers]
+        target_total = len(target_slides)
+        if target_total == 0:
+            return list(data.slides)
+
+        semaphore = asyncio.Semaphore(max(1, settings.slide_prompt_concurrency))
+        state: dict[str, Any] = {"done": 0, "failed": 0}
+        generated_by_no: dict[int, str] = {}  # slide_no -> speech_script str
+
+        async def generate_one(target: Slide) -> None:
+            async with semaphore:
+                self._ensure_not_cancelled(job_service, job)
+                try:
+                    payload = await self._call_json(
+                        "讲解稿生成",
+                        SPEECH_SCRIPT_PROMPT,
+                        self._speech_script_payload(data, target),
+                        async_client=async_client,
+                    )
+                    script = payload.get("speech_script")
+                    if not isinstance(script, str) or not script.strip():
+                        logger.warning(
+                            "[generation] speech-script slide={} returned empty project_id={}",
+                            target.slide_no, data.project_id,
+                        )
+                        state["failed"] += 1
+                        return
+                    generated_by_no[target.slide_no] = script
+                    # 逐页落盘，让前端轮询可见
+                    if job_service and job:
+                        try:
+                            self.project_service.persist_streaming_slide(
+                                data.project_id, "speech_scripts",
+                                {"slide_no": target.slide_no, "speech_script": script},
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "[generation] speech-script persist failed project_id={} slide_no={} error={}",
+                                data.project_id, target.slide_no, exc,
+                            )
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    logger.exception(
+                        "[generation] speech-script slide={} call failed project_id={} error={}",
+                        target.slide_no, data.project_id, exc,
+                    )
+                    state["failed"] += 1
+                finally:
+                    state["done"] += 1
+                    if job_service and job:
+                        done_ratio = state["done"] / target_total
+                        progress = base_progress + done_ratio * progress_span
+                        suffix = f"（{state['failed']} 失败）" if state["failed"] else ""
+                        job_service.update(
+                            job, stage="speech_scripts_generating", progress=progress,
+                            message=f"正在生成讲解稿：{state['done']}/{target_total} 页{suffix}",
+                            status="running",
+                            completed_slides=state["done"], total_slides=target_total,
+                        )
+
+        await asyncio.gather(*(generate_one(s) for s in target_slides))
+        if state["failed"] >= target_total:
+            logger.warning(
+                "[generation] speech-script all slides failed project_id={} target_total={}",
+                data.project_id, target_total,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"全部 {target_total} 页讲解稿生成失败，请检查模型配置或稍后重试",
+            )
+        # 合并：成功页写入 speech_script，失败页保留原值
+        result = []
+        for s in data.slides:
+            if s.slide_no in generated_by_no:
+                s.speech_script = generated_by_no[s.slide_no]
+            result.append(s)
+        return result
+
+    async def regenerate_speech_scripts(
+            self,
+            project_id: str,
+            slide_numbers: list[int] | None = None,
+            job_service: JobService | None = None,
+            job: JobRecord | None = None,
+    ) -> ProjectData:
+        """重生成讲解稿（单页 / 全部）。不改 generation_state，不碰 consistency_report。"""
+        data = self.project_service.get_project_data_internal(project_id)
+        if not data.slides:
+            raise HTTPException(status_code=409, detail="当前项目没有可生成讲解稿的页面，请先生成大纲")
+        if slide_numbers is not None:
+            valid_nos = {s.slide_no for s in data.slides}
+            matching = [n for n in slide_numbers if n in valid_nos]
+            if not matching:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"指定的页码 {slide_numbers} 在当前项目中不存在",
+                )
+        if job_service and job:
+            self._update_job(job_service, job, "queued", 0.02, "讲解稿重生成任务已创建")
+        async with build_gateway_async_client() as async_client:
+            generated = await self.generate_speech_scripts(
+                data, slide_numbers,
+                job_service=job_service, job=job,
+                async_client=async_client,
+                base_progress=0.05,
+                progress_span=0.90,
+            )
+        data.slides = generated
+        # 讲解稿不影响 generation_state 和 consistency_report
+        if job_service and job:
+            self._update_job(job_service, job, "speech_scripts_generated", 0.98, "讲解稿重生成结果已保存")
+        self.project_service.save_project_data(data)
+        return data
 
     async def check_consistency(self, data: ProjectData, threshold: float | None = None,
                                 async_client: httpx.AsyncClient | None = None) -> ConsistencyReport:

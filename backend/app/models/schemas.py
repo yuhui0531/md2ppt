@@ -306,6 +306,7 @@ class Slide(BaseModel):
     page_text: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     prompt: str = ""
+    speech_script: str = ""
     style_consistency_score: float | None = None
     style_issues: list[str] = Field(default_factory=list)
     revision_needed: bool = False
@@ -381,6 +382,14 @@ class CreateSlideResponse(BaseModel):
 
 class UpdateSlidePromptRequest(BaseModel):
     prompt: str
+
+
+class UpdateSlideSpeechScriptRequest(BaseModel):
+    speech_script: str
+
+
+class RegenerateSpeechScriptsRequest(BaseModel):
+    slide_numbers: list[int] | None = None
 
 
 class CheckConsistencyRequest(BaseModel):
