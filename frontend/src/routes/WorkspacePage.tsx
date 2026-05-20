@@ -641,6 +641,7 @@ export function WorkspacePage() {
               </Button>
             )}
             {isImported ? (
+              <>
               <Popconfirm
                 title="重新解析页面结构"
                 description="会基于当前 prompt 重新提取结构化字段（页面类型、版式建议、核心信息等），不会改写 prompt 正文。已有的一致性检查报告会被清空，下次进入生图前会重新检查。"
@@ -676,6 +677,7 @@ export function WorkspacePage() {
                   {speechScriptsRegenJobRunning ? '讲解稿重生成中…' : '重新生成全部讲解稿'}
                 </Button>
               </Popconfirm>
+              </>
             ) : (
               <>
                 <Popconfirm
