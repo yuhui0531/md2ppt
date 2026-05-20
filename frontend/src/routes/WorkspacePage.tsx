@@ -948,27 +948,43 @@ export function WorkspacePage() {
                 />
               )}
               {detailView === 'speech_script' && (
-                <TextArea
-                  value={draftSpeechScript}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setDraftSpeechScript(value);
-                    userEditedScriptRef.current = value !== (slide?.speech_script ?? '');
-                  }}
-                  disabled={!slide || mutationDisabled}
-                  placeholder="讲解稿生成中…"
-                  style={{
-                    height: '100%',
-                    minHeight: 520,
-                    resize: 'none',
-                    border: 'none',
-                    background: 'transparent',
-                    padding: 16,
-                    fontFamily: 'inherit',
-                    fontSize: 14,
-                    lineHeight: 1.8,
-                  }}
-                />
+                slide && !slide.speech_script && !isScriptDirty ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 520, gap: 16 }}>
+                    <Text type="secondary">当前页暂无讲解稿</Text>
+                    {!isImported && (
+                      <Button
+                        icon={<SyncOutlined />}
+                        disabled={mutationDisabled}
+                        loading={busy === BUSY.regenerateCurrentSpeechScript || speechScriptsRegenJobRunning}
+                        onClick={handleRegenerateCurrentSpeechScript}
+                      >
+                        生成当前页讲解稿
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <TextArea
+                    value={draftSpeechScript}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setDraftSpeechScript(value);
+                      userEditedScriptRef.current = value !== (slide?.speech_script ?? '');
+                    }}
+                    disabled={!slide || mutationDisabled}
+                    placeholder="讲解稿生成中…"
+                    style={{
+                      height: '100%',
+                      minHeight: 520,
+                      resize: 'none',
+                      border: 'none',
+                      background: 'transparent',
+                      padding: 16,
+                      fontFamily: 'inherit',
+                      fontSize: 14,
+                      lineHeight: 1.8,
+                    }}
+                  />
+                )
               )}
               {detailView === 'preview' && <MarkdownPreview content={draftPrompt} />}
               {detailView === 'detail' && slide && (

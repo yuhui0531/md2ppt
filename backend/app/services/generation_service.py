@@ -306,7 +306,9 @@ class GenerationService:
                 # 报告、图片、前端选中态在重生前后保持锚定。
                 replacement.id = original.id
                 # prompt 重生不触碰演讲稿；保留原有 speech_script。
-                if replacement.speech_script is None:
+                # speech_script 默认值是 ""，LLM 不会回传该字段，用 not 而非 is None
+                # 判断——is None 永远不触发（schema 默认为空串）。
+                if not replacement.speech_script:
                     replacement.speech_script = original.speech_script
                 merged.append(replacement)
             data.slides = merged

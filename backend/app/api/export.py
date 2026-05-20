@@ -106,6 +106,8 @@ async def export_pptx(
                 image_stream = BytesIO(image_bytes)
                 pptx_slide = prs.slides.add_slide(blank_layout)
                 pptx_slide.shapes.add_picture(image_stream, Emu(0), Emu(0), prs.slide_width, prs.slide_height)
+                if slide.speech_script and slide.speech_script.strip():
+                    pptx_slide.notes_slide.notes_text_frame.text = slide.speech_script.strip()
             except Exception as exc:
                 logger.warning("[export-pptx] slide {} image failed: {}", slide.slide_no, exc)
                 failed_slides.append(slide.slide_no)
